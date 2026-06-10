@@ -39,9 +39,8 @@ export async function fetchCompetitorDetails(skuId) {
   const response = await axios.get(`${BASE_URL}/competitor-details/${encodeURIComponent(skuId)}`,
     { withCredentials: true }
   );
-  return response.data.data; // array of { CompetitorPrice, ProductURL, StoreName, StockStatus }
+  return response.data.data;
 }
-
 
 export async function fetchPPProducts() {
   const response = await axios.get(`${BASE_URL}/pp-products`,
@@ -49,27 +48,21 @@ export async function fetchPPProducts() {
   );
   return response.data.data;
 }
- 
 
 export async function updatePP(skuId, newPP) {
   const response = await axios.patch(`${BASE_URL}/update-pp`,
     { skuId, newPP },
     { withCredentials: true }
   );
-  return response.data.data; // { SKU_ID, PP, ManualPP_UpdatedAt, ManualPP_UpdatedBy, LastBillDate }
+  return response.data.data;
 }
- 
 
 // ── Download blank CSV template ───────────────────────────────
-// Triggers a file download in the browser.
-// The server returns a CSV with just the headers: SKU,PP
 export async function downloadPPTemplate() {
   const response = await axios.get(`${BASE_URL}/pp-template-csv`, {
     withCredentials: true,
-    responseType: 'blob',   // important — treat response as binary
+    responseType: 'blob',
   });
- 
-  // Create a temporary anchor and trigger download
   const url      = window.URL.createObjectURL(new Blob([response.data]));
   const link     = document.createElement('a');
   link.href      = url;
@@ -79,46 +72,34 @@ export async function downloadPPTemplate() {
   link.parentNode.removeChild(link);
   window.URL.revokeObjectURL(url);
 }
- 
 
-
-
-
-
-
-
-// ── Validate SKUs — now returns currentPP per matched SKU ─────
+// ── Validate SKUs ─────────────────────────────────────────────
 export async function validateBulkPP(skus) {
   const response = await axios.post(`${BASE_URL}/validate-skus`,
     { skus },
     { withCredentials: true }
   );
-  // Returns: { valid: [{ sku, currentPP }], notFound: string[] }
   return response.data;
 }
- 
-// ── Submit bulk PP update — now sends unidentified rows too ───
-// rows:         [{ skuId, newPP }]
-// unidentified: [{ sku, pp }]
-// fileName:     string
+
+// ── Bulk PP update ────────────────────────────────────────────
 export async function bulkUpdatePP(rows, unidentified = [], fileName = '') {
   const response = await axios.post(`${BASE_URL}/bulk-update-pp`,
     { rows, unidentified, fileName },
     { withCredentials: true }
   );
   return response.data.data;
-  // Returns: { sessionId, updated, unidentifiedCount, updatedBy, updatedAt }
 }
- 
-// ── Fetch bulk upload history ─────────────────────────────────
+
+// ── Bulk upload history ───────────────────────────────────────
 export async function fetchBulkUploadHistory() {
   const response = await axios.get(`${BASE_URL}/bulk-upload-history`,
     { withCredentials: true }
   );
   return response.data.data;
 }
- 
-// ── Fetch unidentified SKUs for a session ─────────────────────
+
+// ── Unidentified SKUs for a session ──────────────────────────
 export async function fetchSessionUnidentified(sessionId) {
   const response = await axios.get(
     `${BASE_URL}/bulk-upload-session/${sessionId}/unidentified`,
@@ -126,8 +107,8 @@ export async function fetchSessionUnidentified(sessionId) {
   );
   return response.data.data;
 }
- 
-// ── Export unidentified SKUs as CSV download ──────────────────
+
+// ── Export unidentified SKUs as CSV ──────────────────────────
 export async function exportSessionUnidentified(sessionId) {
   const response = await axios.get(
     `${BASE_URL}/bulk-upload-session/${sessionId}/export`,
@@ -143,19 +124,14 @@ export async function exportSessionUnidentified(sessionId) {
   window.URL.revokeObjectURL(url);
 }
 
-
-
-// ── Fetch all category settings ───────────────────────────────
+// ── Category settings ─────────────────────────────────────────
 export async function fetchCategorySettings() {
   const response = await axios.get(`${BASE_URL}/category-settings`,
     { withCredentials: true }
   );
   return response.data.data;
 }
- 
-// ── Update one category's settings ───────────────────────────
-// payload: { GST, CostOfBusiness, ProfitMargin, ScrapFreqDays, IsScrapEnabled }
-// Pass null for a business variable to revert it to system default.
+
 export async function updateCategorySettings(categoryName, payload) {
   const response = await axios.put(
     `${BASE_URL}/category-settings/${encodeURIComponent(categoryName)}`,
@@ -164,13 +140,6 @@ export async function updateCategorySettings(categoryName, payload) {
   );
   return response.data.data;
 }
- 
-
-
-
-
-
-
 
 // ── User management (admin only) ──────────────────────────────
 export async function fetchUsers() {
@@ -194,34 +163,24 @@ export async function removeUser(email) {
   );
 }
 
-
-
-// ── Trigger recommendation engine ─────────────────────────────
+// ── Recommendation engine ─────────────────────────────────────
 export async function runRecommendationEngine() {
   const response = await axios.post(
     `${BASE_URL}/run-recommendation-engine`, {},
     { withCredentials: true }
   );
-  return response.data; // { jobId }
+  return response.data;
 }
 
-// ── Poll job status ───────────────────────────────────────────
 export async function getRecommendationJobStatus(jobId) {
   const response = await axios.get(
     `${BASE_URL}/recommendation-job/${jobId}`,
     { withCredentials: true }
   );
-  return response.data.data; // { status, updatedCount, error, ... }
+  return response.data.data;
 }
 
-
-
-// ─────────────────────────────────────────────────────────────
-// ADD THESE TWO FUNCTIONS to src/services/api.js
-// Place them at the bottom, alongside runRecommendationEngine
-// ─────────────────────────────────────────────────────────────
-
-// ── Trigger full competitor price scrape ──────────────────────
+// ── Scraper ───────────────────────────────────────────────────
 export async function runScraper() {
   const response = await axios.post(
     `${BASE_URL}/run-scraper`, {},
@@ -230,11 +189,26 @@ export async function runScraper() {
   return response.data; // { jobId }
 }
 
-// ── Poll scraper job status ───────────────────────────────────
 export async function getScraperJobStatus(jobId) {
   const response = await axios.get(
     `${BASE_URL}/scraper-job/${jobId}`,
     { withCredentials: true }
   );
-  return response.data.data; // { status, categoriesDone, totalScraped, error, ... }
+  return response.data.data; // { status, cancelRequested, logs, error, ... }
+}
+
+export async function cancelScraperJob(jobId) {
+  const response = await axios.post(
+    `${BASE_URL}/scraper-job/${jobId}/cancel`, {},
+    { withCredentials: true }
+  );
+  return response.data;
+}
+
+export async function getScraperJobLogs(jobId, from = 0) {
+  const response = await axios.get(
+    `${BASE_URL}/scraper-job/${jobId}/logs?from=${from}`,
+    { withCredentials: true }
+  );
+  return response.data.data; // { lines, total, status }
 }
