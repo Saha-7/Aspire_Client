@@ -9,7 +9,7 @@ import { fetchRecommendations, checkAuth, logout } from "./services/api";
 import SettingsView from "./components/SettingsView";
 import UserManagementView from "./components/UserManagementView";
 import RecalculateButton from "./components/RecalculateButton";
-import RunScraperButton from "./components/RunScraperButton";
+//import RunScraperButton from "./components/RunScraperButton";
 
 // ── Views ────────────────────────────────────────────────────
 const VIEW = {
@@ -171,7 +171,7 @@ export default function App() {
   }
 
   if (view === VIEW.SETTINGS) {
-    return <SettingsView onClose={() => setView(VIEW.HOME)} />;
+    return <SettingsView onClose={() => setView(VIEW.HOME)} user={user}/>;
   }
 
   // ── Main app ──────────────────────────────────────────────
@@ -256,9 +256,9 @@ export default function App() {
 
 
 {/* Run full competitor price scrape — admin + supervisor only */}
-{(user.role === 'admin' || user.role === 'supervisor') && (
+{/* {(user.role === 'admin' || user.role === 'supervisor') && (
   <RunScraperButton onDone={loadData} />
-)}
+)} */}
 
 
 
