@@ -181,12 +181,22 @@ export async function getRecommendationJobStatus(jobId) {
 }
 
 // ── Scraper ───────────────────────────────────────────────────
-export async function runScraper() {
-  const response = await axios.post(
-    `${BASE_URL}/run-scraper`, {},
+
+export async function getScraperCategories() {
+  const response = await axios.get(
+    `${BASE_URL}/scraper-categories`,
     { withCredentials: true }
   );
-  return response.data; // { jobId }
+  return response.data.data;
+}
+
+export async function runScraper(categoryNames) {
+  const response = await axios.post(
+    `${BASE_URL}/run-scraper`,
+    { categoryNames },
+    { withCredentials: true }
+  );
+  return response.data;
 }
 
 export async function getScraperJobStatus(jobId) {
