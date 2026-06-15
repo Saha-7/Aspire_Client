@@ -370,7 +370,10 @@ if (logData.lines && logData.lines.length > 0) {
   const lastScraped = formatLastScraped(settings?.LastScrapedAt);
 
   return (
-    <label key={cat.categoryName} className="...">
+    <label
+  key={cat.categoryName}
+  className="flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200"
+>
       <input
         type="checkbox"
         checked={selectedCategories.has(cat.categoryName)}
