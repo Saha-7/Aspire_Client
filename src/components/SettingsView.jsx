@@ -11,6 +11,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import CategoryMappingTab from './CategoryMappingTab';
 import {
   fetchCategorySettings,
   updateCategorySettings,
@@ -28,7 +29,7 @@ const SYSTEM_DEFAULTS = {
   ProfitMargin   : 5,
 };
 
-const TABS = { BUSINESS: 'business', SCRAPING: 'scraping' };
+const TABS = { BUSINESS: 'business', SCRAPING: 'scraping', MAPPING: 'mapping' };
 const STATUS = { IDLE: 'idle', SAVING: 'saving', SAVED: 'saved', ERROR: 'error' };
 
 // ── Formatters ────────────────────────────────────────────────
@@ -878,6 +879,16 @@ export default function SettingsView({ onClose, user }) {
                   </svg>
                 ),
               },
+              {
+  key: TABS.MAPPING,
+  label: 'Category Mapping',
+  icon: (
+    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+        d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+    </svg>
+  ),
+},
             ].map(tab => (
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
                 className={`flex items-center gap-2 px-4 py-3 text-xs font-medium border-b-2 transition-colors
@@ -989,7 +1000,15 @@ export default function SettingsView({ onClose, user }) {
               </table>
             </div>
           </>
+
         )}
+
+        {/* ── Category Mapping Tab ── */}
+{!loading && !error && activeTab === TABS.MAPPING && (
+  <CategoryMappingTab user={user} />
+)}
+
+
       </main>
     </div>
   );
