@@ -222,3 +222,39 @@ export async function getScraperJobLogs(jobId, from = 0) {
   );
   return response.data.data; // { lines, total, status }
 }
+
+
+
+// ── Category Mappings ─────────────────────────────────────────
+
+export async function fetchStoreCategories() {
+  const response = await axios.get(`${BASE_URL}/store-categories`, {
+    withCredentials: true,
+  });
+  return response.data.data;
+}
+
+export async function fetchCategoryMappings() {
+  const response = await axios.get(`${BASE_URL}/category-mappings`, {
+    withCredentials: true,
+  });
+  return response.data.data;
+}
+
+
+export async function saveCategoryMapping(internalCategory, storeName, storeSlug) {
+  const response = await axios.post(
+    `${BASE_URL}/category-mappings`,
+    { internalCategory, storeName, storeSlug },
+    { withCredentials: true }
+  );
+  return response.data.data;
+}
+
+
+export async function deleteCategoryMapping(id) {
+  await axios.delete(
+    `${BASE_URL}/category-mappings/${id}`,
+    { withCredentials: true }
+  );
+}
