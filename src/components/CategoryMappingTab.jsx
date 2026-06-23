@@ -79,11 +79,14 @@ function MappingBadge({ mapping, onDelete, deleting }) {
 // ─────────────────────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────────────────────
-export default function CategoryMappingTab({ user }) {
-
+export default function CategoryMappingTab({ user, categorySettings = [] }) {
   // ── Data ──────────────────────────────────────────────────
   const [storeCategories,   setStoreCategories]   = useState([]);
-  const [internalCategories, setInternalCategories] = useState([]);
+ // const [internalCategories, setInternalCategories] = useState([]);
+ const internalCategories = useMemo(
+  () => [...new Set(categorySettings.map(s => s.CategoryName))].sort((a, b) => a.localeCompare(b)),
+  [categorySettings]
+);
   const [mappings,          setMappings]           = useState([]);
   const [loading,           setLoading]            = useState(true);
   const [error,             setError]              = useState(null);
@@ -116,28 +119,21 @@ export default function CategoryMappingTab({ user }) {
   }, []);
 
   async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const [storeCats, maps] = await Promise.all([
-        fetchStoreCategories(),
-        fetchCategoryMappings(),
-      ]);
-      setStoreCategories(storeCats);
-      setMappings(maps);
-
-      // Derive unique internal categories from mappings + a placeholder
-      // The real list comes from the backend via /api/category-settings
-      // which has all 190 categories. We fetch that separately.
-      const { fetchCategorySettings } = await import('../services/api');
-      const settings = await fetchCategorySettings();
-      setInternalCategories(settings.map(s => s.CategoryName).sort((a, b) => a.localeCompare(b)));
-    } catch (err) {
-      setError('Failed to load data. Check the API server.');
-    } finally {
-      setLoading(false);
-    }
+  setLoading(true);
+  setError(null);
+  try {
+    const [storeCats, maps] = await Promise.all([
+      fetchStoreCategories(),
+      fetchCategoryMappings(),
+    ]);
+    setStoreCategories(storeCats);
+    setMappings(maps);
+  } catch (err) {
+    setError('Failed to load data. Check the API server.');
+  } finally {
+    setLoading(false);
   }
+}
 
   // ── Derived: mapping lookup maps ──────────────────────────
   // slugKey → mapping  (for left panel — is this slug already mapped?)

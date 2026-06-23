@@ -1004,9 +1004,9 @@ export default function SettingsView({ onClose, user }) {
         )}
 
         {/* ── Category Mapping Tab ── */}
-{!loading && !error && activeTab === TABS.MAPPING && (
-  <CategoryMappingTab user={user} />
-)}
+<div style={{ display: activeTab === TABS.MAPPING ? 'block' : 'none' }}>
+  <CategoryMappingTab user={user} categorySettings={data} />
+</div>
 
 
       </main>

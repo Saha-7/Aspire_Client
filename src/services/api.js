@@ -258,3 +258,12 @@ export async function deleteCategoryMapping(id) {
     { withCredentials: true }
   );
 }
+
+
+// ── Internal-only recommendations (no competitor matching) ────
+export async function fetchInternalRecommendations() {
+  const response = await axios.get(`${BASE_URL}/internal-recommendations`,
+    { withCredentials: true }
+  );
+  return response.data.data;
+}
