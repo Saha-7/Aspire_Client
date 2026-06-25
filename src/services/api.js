@@ -282,3 +282,14 @@ export async function fetchScrapeRunDetail(runId = 'latest') {
   );
   return response.data.data;
 }
+
+
+// Returns a Blob — fetched via axios (not a plain <a href>) so the same
+// auth/cookie handling used everywhere else in this app applies here too.
+export async function downloadScrapeRunSkuMatchesCsv(runId = 'latest') {
+  const response = await axios.get(
+    `${BASE_URL}/scrape-stats/${encodeURIComponent(runId)}/sku-matches.csv`,
+    { withCredentials: true, responseType: 'blob' }
+  );
+  return response.data;
+}
