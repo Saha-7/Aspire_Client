@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useEffect, useState, useCallback } from 'react';
-import { fetchScrapeRuns, fetchScrapeRunDetail } from '../services/api';
+import { fetchScrapeRuns, fetchScrapeRunDetail, downloadScrapeRunSkuMatchesCsv } from '../services/api';
 
 function fmtDate(val) {
   if (!val) return '—';
@@ -87,6 +87,34 @@ export default function ScrapeStatsView({ onClose }) {
     setSelectedRunId(value);
     loadDetail(value);
   }
+
+
+
+  //
+  const [downloading, setDownloading] = useState(false);
+
+async function handleDownloadCsv() {
+  setDownloading(true);
+  try {
+    const blob = await downloadScrapeRunSkuMatchesCsv(selectedRunId);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `scrape-sku-matches-${runId || 'latest'}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error('CSV download failed:', err.message);
+    setError('Failed to download CSV');
+  } finally {
+    setDownloading(false);
+  }
+}
+//
+
+
 
   const totals = rows.reduce((acc, r) => ({
     TotalScraped       : acc.TotalScraped + (r.TotalScraped || 0),
@@ -190,6 +218,18 @@ export default function ScrapeStatsView({ onClose }) {
                   <span className="text-red-400 ml-2">· {totals.ErrorRows} store/category failed</span>
                 )}
               </div>
+
+              <button onClick={handleDownloadCsv} disabled={downloading}
+  className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-lg
+    bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-colors">
+  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+      d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+  </svg>
+  {downloading ? 'Preparing...' : 'Download CSV'}
+</button>
+
+
               <span className="text-[10px] text-slate-600 font-mono">RunId: {runId}</span>
             </div>
 
