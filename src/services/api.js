@@ -267,3 +267,18 @@ export async function fetchInternalRecommendations() {
   );
   return response.data.data;
 }
+
+
+export async function fetchScrapeRuns(limit = 25) {
+  const response = await axios.get(`${BASE_URL}/scrape-stats/runs`,
+    { params: { limit }, withCredentials: true }
+  );
+  return response.data.data;
+}
+
+export async function fetchScrapeRunDetail(runId = 'latest') {
+  const response = await axios.get(`${BASE_URL}/scrape-stats/${encodeURIComponent(runId)}`,
+    { withCredentials: true }
+  );
+  return response.data.data;
+}

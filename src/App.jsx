@@ -15,6 +15,7 @@ import {
 import SettingsView from "./components/SettingsView";
 import UserManagementView from "./components/UserManagementView";
 import RecalculateButton from "./components/RecalculateButton";
+import ScrapeStatsView from "./components/ScrapeStatsView";
 //import RunScraperButton from "./components/RunScraperButton";
 
 // ── Views ────────────────────────────────────────────────────
@@ -24,6 +25,7 @@ const VIEW = {
   BULK_PP: "bulk_pp",
   USER_MGMT: "user_mgmt",
   SETTINGS: "settings",        // ← was missing
+  SCRAPE_STATS: "scrape_stats", // new
 };
 
 export default function App() {
@@ -224,6 +226,10 @@ export default function App() {
   if (view === VIEW.SETTINGS) {
     return <SettingsView onClose={() => setView(VIEW.HOME)} user={user}/>;
   }
+
+  if (view === VIEW.SCRAPE_STATS) {
+  return <ScrapeStatsView onClose={() => setView(VIEW.HOME)} user={user} />;
+}
 
   // ── Main app ──────────────────────────────────────────────
   return (
@@ -429,6 +435,25 @@ export default function App() {
                         </div>
                       </button>
 
+                       {/* Scraper stats — admin and supervisor only */}
+                       <button
+  onClick={() => { setView(VIEW.SCRAPE_STATS); setMenuOpen(false); }}
+  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-xs text-slate-200
+    hover:bg-slate-700/70 transition-colors text-left"
+>
+  <div className="w-6 h-6 rounded-md bg-amber-900/60 border border-amber-700/60
+    flex items-center justify-center flex-shrink-0">
+    <svg className="w-3 h-3 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+    </svg>
+  </div>
+  <div>
+    <p className="font-medium">Scrape Details</p>
+    <p className="text-[10px] text-slate-500 mt-0.5">Matched / unmatched / stock per run</p>
+  </div>
+</button>
+
                       <div className="mx-3 my-1.5 border-t border-slate-700/60" />
                     </>
                   )}
@@ -523,7 +548,7 @@ export default function App() {
                   </span>
 
                   <span className="text-xs font-medium whitespace-nowrap">
-                    Internal Products RecommendedSP
+                    Basic Recommendations
                   </span>
                 </button>
               </div>
