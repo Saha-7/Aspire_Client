@@ -332,3 +332,12 @@ export async function fetchScrapeRunSkuMatches(runId = 'latest') {
   );
   return response.data.data; // { runId, rows }
 }
+
+
+export async function getActiveScraperJobs() {
+  const response = await axios.get(
+    `${BASE_URL}/scraper-jobs/active`,
+    { withCredentials: true }
+  );
+  return response.data.data; // array of { jobId, status, startedBy, categoryNames, startedAt, finishedAt, error }
+}
