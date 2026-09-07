@@ -66,37 +66,52 @@ function parseCSV(text) {
   }
 
   const rows = [];
-  const seenSKUs = new Map();
-
   for (let i = 1; i < lines.length; i++) {
     const parts = lines[i].split(',');
     const rawSKU = (parts[0] ?? '').replace(/[^\x20-\x7E]/g, '').trim();
     const rawPP  = (parts[1] ?? '').replace(/[^\x20-\x7E]/g, '').trim();
     const rowNum = i + 1;
-
     rows.push({ sku: rawSKU, rawPP, rowNum, errors: [] });
+  }
 
-    const skuKey = rawSKU.toLowerCase();
+  // Duplicate-SKU check — only among rows that actually provide a PP.
+  // A row with no PP is skipped entirely (see below) and shouldn't cause
+  // a duplicate flag on a different row that IS being processed.
+  const seenSKUs = new Map();
+  for (let idx = 0; idx < rows.length; idx++) {
+    const row = rows[idx];
+    const ppProvided = row.rawPP !== '' && row.rawPP !== null;
+    if (!ppProvided) continue;
+
+    const skuKey = row.sku.toLowerCase();
     if (seenSKUs.has(skuKey)) {
       const firstIdx = seenSKUs.get(skuKey);
       if (!rows[firstIdx].errors.includes('Duplicate SKU')) {
         rows[firstIdx].errors.push('Duplicate SKU');
       }
-      rows[rows.length - 1].errors.push('Duplicate SKU');
+      row.errors.push('Duplicate SKU');
     } else {
-      seenSKUs.set(skuKey, rows.length - 1);
+      seenSKUs.set(skuKey, idx);
     }
   }
 
   for (const row of rows) {
+    const ppProvided = row.rawPP !== '' && row.rawPP !== null;
+
+    // No PP given for this SKU — not an error, just nothing to do. Leave
+    // it out of validation/import entirely; the sales rep may fill it in
+    // on a later upload.
+    if (!ppProvided) {
+      row.skipped = true;
+      continue;
+    }
+
     if (!row.sku) {
       row.errors.push('SKU is empty');
     }
 
     const ppNum = parseFloat(row.rawPP);
-    if (row.rawPP === '' || row.rawPP === null) {
-      row.errors.push('PP is empty');
-    } else if (isNaN(ppNum)) {
+    if (isNaN(ppNum)) {
       row.errors.push(`PP "${row.rawPP}" is not a number`);
     } else if (ppNum <= 0) {
       row.errors.push('PP must be greater than 0');
@@ -219,8 +234,19 @@ function PPChangeBadge({ currentPP, newPP }) {
 }
 
 // ── Row status badge ──────────────────────────────────────────
-// Now three variants: valid, client-error, unidentified (warning)
-function StatusBadge({ errors, isUnidentified }) {
+// Four variants now: valid, client-error, unidentified (warning), skipped
+function StatusBadge({ errors, isUnidentified, skipped }) {
+  if (skipped) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
+        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+        Skipped — no PP provided
+      </span>
+    );
+  }
+
   if (errors.length > 0) {
     return (
       <div className="flex flex-col gap-0.5">
@@ -305,8 +331,10 @@ export default function BulkPPUpdateView({ onClose, user }) {
 
     setParsedRows(rows);
 
-    // Only validate rows that passed client-side checks
-    const clientValidRows = rows.filter(r => r.errors.length === 0);
+    // Only validate rows that passed client-side checks AND actually
+    // provide a PP — rows with no PP are skipped entirely, no need to
+    // check whether their SKU exists at all.
+    const clientValidRows = rows.filter(r => r.errors.length === 0 && !r.skipped);
     if (clientValidRows.length === 0) {
       setStage(STAGE.PREVIEW);
       return;
@@ -341,6 +369,11 @@ export default function BulkPPUpdateView({ onClose, user }) {
 
   // ── Compute final row status split ────────────────────────
   const rowsWithStatus = parsedRows.map(row => {
+    // No PP provided — skipped entirely, never looked up against the DB
+    if (row.skipped) {
+      return { ...row, isUnidentified: false, currentPP: null };
+    }
+
     const key = (row.sku || '').toLowerCase();
     const v   = skuValidation[key];
 
@@ -363,12 +396,15 @@ export default function BulkPPUpdateView({ onClose, user }) {
     return { ...row, isUnidentified: true, currentPP: null };
   });
 
-  // Hard errors = client-side format issues (duplicate, empty, bad PP)
-  const hardErrorRows    = rowsWithStatus.filter(r => r.errors.length > 0);
+  // Skipped = no PP provided at all — excluded from every other bucket,
+  // never validated, never sent to the server.
+  const skippedRows      = rowsWithStatus.filter(r => r.skipped);
+  // Hard errors = client-side format issues (duplicate, empty SKU, bad PP)
+  const hardErrorRows    = rowsWithStatus.filter(r => !r.skipped && r.errors.length > 0);
   // Unidentified = SKU not in DB (will be stored in UnIdentifiedProducts)
-  const unidentifiedRows = rowsWithStatus.filter(r => r.errors.length === 0 && r.isUnidentified);
+  const unidentifiedRows = rowsWithStatus.filter(r => !r.skipped && r.errors.length === 0 && r.isUnidentified);
   // Valid = matched in DB, will update InternalProducts
-  const validRows        = rowsWithStatus.filter(r => r.errors.length === 0 && !r.isUnidentified);
+  const validRows        = rowsWithStatus.filter(r => !r.skipped && r.errors.length === 0 && !r.isUnidentified);
   // Large change warnings (≥10%, for display only — does NOT block)
   const largeChangeCount = validRows.filter(r => {
     const pct = calcPctChange(r.currentPP, r.pp);
@@ -609,6 +645,12 @@ export default function BulkPPUpdateView({ onClose, user }) {
                     ⚠ {unidentifiedRows.length} unidentified
                   </span>
                 )}
+                {skippedRows.length > 0 && (
+                  <span className="text-xs font-medium px-2.5 py-1 rounded-full
+                    bg-slate-800 text-slate-400 border border-slate-700">
+                    — {skippedRows.length} skipped (no PP)
+                  </span>
+                )}
                 {hardErrorRows.length > 0 && (
                   <span className="text-xs font-medium px-2.5 py-1 rounded-full
                     bg-red-900/40 text-red-400 border border-red-700/50">
@@ -626,7 +668,7 @@ export default function BulkPPUpdateView({ onClose, user }) {
                     d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
                 <span>
-                  {hardErrorRows.length} row{hardErrorRows.length !== 1 ? 's have' : ' has'} format errors (duplicate, empty, or invalid PP).
+                  {hardErrorRows.length} row{hardErrorRows.length !== 1 ? 's have' : ' has'} format errors (duplicate SKU, missing SKU, or invalid PP).
                   Correct the CSV and re-upload to proceed.
                 </span>
               </div>
@@ -677,7 +719,9 @@ export default function BulkPPUpdateView({ onClose, user }) {
                 <tbody>
                   {rowsWithStatus.map((row, i) => {
                     const hasHardError = row.errors.length > 0;
-                    const rowBg = hasHardError
+                    const rowBg = row.skipped
+                      ? 'bg-slate-900/10 opacity-60'
+                      : hasHardError
                       ? 'bg-red-900/10'
                       : row.isUnidentified
                       ? 'bg-amber-900/10'
@@ -693,6 +737,7 @@ export default function BulkPPUpdateView({ onClose, user }) {
                         {/* SKU */}
                         <td className="px-4 py-3">
                           <span className={`font-mono text-xs ${
+                            row.skipped ? 'text-slate-500' :
                             hasHardError ? 'text-red-300' :
                             row.isUnidentified ? 'text-amber-300' :
                             'text-violet-300'
@@ -732,7 +777,7 @@ export default function BulkPPUpdateView({ onClose, user }) {
 
                         {/* Status */}
                         <td className="px-4 py-3">
-                          <StatusBadge errors={row.errors} isUnidentified={row.isUnidentified} />
+                          <StatusBadge errors={row.errors} isUnidentified={row.isUnidentified} skipped={row.skipped} />
                         </td>
                       </tr>
                     );
@@ -871,9 +916,7 @@ export default function BulkPPUpdateView({ onClose, user }) {
                   d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <span>
-                PP values are updated. Run the recommendation engine
-                (<code className="text-violet-300 bg-slate-700 px-1 rounded">npm run recommend</code>)
-                to recalculate RecommendedSP for affected products.
+                PP values are updated. Run the recommendation engine to recalculate RecommendedSP for affected products.
               </span>
             </div>
 
@@ -900,3 +943,4 @@ export default function BulkPPUpdateView({ onClose, user }) {
     </div>
   );
 }
+
