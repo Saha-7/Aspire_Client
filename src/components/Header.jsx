@@ -8,6 +8,7 @@
 
 import { useRef, useState, useEffect } from "react";
 import RecalculateButton from "./RecalculateButton";
+import AlertBell from "./Alertbell";
 
 export const VIEW = {
   HOME: "/",
@@ -28,6 +29,7 @@ export default function Header({
   lastRefreshed,
   showInternalView,
   onRecalcDone,
+  onAlertTakeAction
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
@@ -308,6 +310,11 @@ export default function Header({
 
           {/* Recalculate — only for the main (non-internal) recommendation view */}
           {!showInternalView && <RecalculateButton onDone={onRecalcDone} />}
+
+
+          {/* Alerts bell */}
+<AlertBell navigate={navigate} onTakeAction={onAlertTakeAction} />
+
 
           {/* ── Hamburger menu ── */}
           <div className="relative" ref={menuRef}>
