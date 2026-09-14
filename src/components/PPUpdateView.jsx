@@ -17,6 +17,8 @@ export default function PPUpdateView({ onClose }) {
   const [error, setError]               = useState(null);
   const [searchQuery, setSearchQuery]   = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
+  const [activeInStockOnly, setActiveInStockOnly] = useState(false);
+  const [ppFilter, setPpFilter] = useState('all'); // 'all' | 'available' | 'unavailable'
 
   // ── Load all products on mount ────────────────────────────
   useEffect(() => {
@@ -68,6 +70,9 @@ export default function PPUpdateView({ onClose }) {
   const filteredData = useMemo(() => {
     let result = data;
     if (selectedCategory) result = result.filter(r => r.Category === selectedCategory);
+    if (activeInStockOnly) result = result.filter(r => r.isActive === 1 || r.isActive === true).filter(r => r.isInStock === 1 || r.isInStock === true);
+    if (ppFilter === 'available')   result = result.filter(r => r.PP != null);
+    if (ppFilter === 'unavailable') result = result.filter(r => r.PP == null);
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter(r =>
@@ -76,7 +81,40 @@ export default function PPUpdateView({ onClose }) {
       );
     }
     return result;
-  }, [data, searchQuery, selectedCategory]);
+  }, [data, searchQuery, selectedCategory, activeInStockOnly, ppFilter]);
+
+  const anyFilterActive = searchQuery || selectedCategory || activeInStockOnly || ppFilter !== 'all';
+
+  // ── Download filtered products as a bulk-PP-style CSV ──────
+  // Same two-column format as the Bulk PP Update template (SKU,PP), but
+  // SKUs are pre-filled from whatever is currently filtered/visible here,
+  // and PP is pre-filled when the product already has one — so a sales
+  // rep can open the file and only needs to type in the blanks.
+  function handleDownloadFiltered() {
+    const escapeCell = (v) => {
+      const s = String(v ?? '');
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = 'SKU,PP\n';
+    const body = filteredData
+      .map(r => `${escapeCell(r.SKU_ID)},${r.PP != null ? r.PP : ''}`)
+      .join('\n');
+    const blob = new Blob([header + body], { type: 'text/csv' });
+    const url  = window.URL.createObjectURL(blob);
+
+    const parts = ['pp_export'];
+    if (selectedCategory)  parts.push(selectedCategory.replace(/\s+/g, '_').toLowerCase());
+    if (activeInStockOnly) parts.push('active_instock');
+    if (ppFilter !== 'all') parts.push(ppFilter);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${parts.join('_')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    link.parentNode.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  }
 
   // ── Stats ─────────────────────────────────────────────────
   const manualCount = data.filter(r => r.PPSource === 'manual' || r.PPSource === 'manual (no bill date)').length;
@@ -187,7 +225,7 @@ export default function PPUpdateView({ onClose }) {
           <>
             {/* Toolbar */}
             <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <SearchBar
                   onSearch={setSearchQuery}
                   value={searchQuery}
@@ -198,11 +236,51 @@ export default function PPUpdateView({ onClose }) {
                   value={selectedCategory}
                   onChange={setSelectedCategory}
                 />
+
+                {/* Active & In Stock toggle */}
+                <button
+                  onClick={() => setActiveInStockOnly(v => !v)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium
+                    border transition-colors ${
+                      activeInStockOnly
+                        ? 'bg-emerald-600/20 border-emerald-600/60 text-emerald-300'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+                    }`}
+                  title="Show only products that are Active and In Stock"
+                >
+                  <span className={`w-7 h-4 rounded-full relative transition-colors flex-shrink-0 ${
+                    activeInStockOnly ? 'bg-emerald-500' : 'bg-slate-600'
+                  }`}>
+                    <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-transform ${
+                      activeInStockOnly ? 'translate-x-3.5' : 'translate-x-0.5'
+                    }`} />
+                  </span>
+                  Active &amp; In Stock
+                </button>
+
+                {/* PP availability filter */}
+                <div className="relative flex items-center gap-2">
+                  <select
+                    value={ppFilter}
+                    onChange={(e) => setPpFilter(e.target.value)}
+                    className="pl-2 pr-7 py-1.5 text-xs text-slate-200 bg-slate-800 border border-slate-700
+                      rounded-lg outline-none appearance-none cursor-pointer
+                      focus:border-violet-500 focus:ring-1 focus:ring-violet-500/40 transition-colors"
+                  >
+                    <option value="all">All PP</option>
+                    <option value="available">PP Available</option>
+                    <option value="unavailable">PP Not Available</option>
+                  </select>
+                  <svg className="w-3 h-3 text-slate-500 absolute right-2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                {(searchQuery || selectedCategory) && (
+
+              <div className="flex items-center gap-3">
+                {anyFilterActive && (
                   <button
-                    onClick={() => { setSearchQuery(''); setSelectedCategory(''); }}
+                    onClick={() => { setSearchQuery(''); setSelectedCategory(''); setActiveInStockOnly(false); setPpFilter('all'); }}
                     className="text-xs text-slate-500 hover:text-slate-300 underline underline-offset-2 transition-colors"
                   >
                     Clear filters
@@ -213,6 +291,20 @@ export default function PPUpdateView({ onClose }) {
                     ? `${data.length} products`
                     : `${filteredData.length} of ${data.length} products`}
                 </span>
+                <button
+                  onClick={handleDownloadFiltered}
+                  disabled={filteredData.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg
+                    bg-emerald-700/80 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed
+                    text-white transition-colors"
+                  title="Download the currently filtered products as a bulk-PP-update CSV"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M12 10v6m0 0l-3-3m3 3l3-3m-9 7h12a2 2 0 002-2V8a2 2 0 00-2-2h-3.586a1 1 0 01-.707-.293l-1.414-1.414A1 1 0 0010.586 4H6a2 2 0 00-2 2v11a2 2 0 002 2z" />
+                  </svg>
+                  Download CSV
+                </button>
               </div>
             </div>
 
@@ -221,7 +313,7 @@ export default function PPUpdateView({ onClose }) {
               <div className="text-center py-20 text-slate-500">
                 <p className="text-sm">No products match your search.</p>
                 <button
-                  onClick={() => { setSearchQuery(''); setSelectedCategory(''); }}
+                  onClick={() => { setSearchQuery(''); setSelectedCategory(''); setActiveInStockOnly(false); setPpFilter('all'); }}
                   className="mt-2 text-xs text-violet-400 hover:text-violet-300 transition-colors"
                 >
                   Clear filters
@@ -258,3 +350,4 @@ export default function PPUpdateView({ onClose }) {
     </div>
   );
 }
+

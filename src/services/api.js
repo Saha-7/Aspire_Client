@@ -341,3 +341,20 @@ export async function getActiveScraperJobs() {
   );
   return response.data.data; // array of { jobId, status, startedBy, categoryNames, startedAt, finishedAt, error }
 }
+
+
+
+
+export async function fetchInsights({ category = null, minThreshold = null } = {}) {
+  const params = {};
+  if (category)     params.category     = category;
+  if (minThreshold != null) params.minThreshold = minThreshold;
+
+  const response = await axios.get(`${BASE_URL}/insights`, { withCredentials: true, params });
+  return response.data; // { success, data, total, defaultThreshold }
+}
+
+export async function dismissInsight(id) {
+  const response = await axios.post(`${BASE_URL}/insights/${id}/dismiss`, {}, { withCredentials: true });
+  return response.data.data;
+}
