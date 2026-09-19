@@ -345,16 +345,38 @@ export async function getActiveScraperJobs() {
 
 
 
-export async function fetchInsights({ category = null, minThreshold = null } = {}) {
-  const params = {};
-  if (category)     params.category     = category;
-  if (minThreshold != null) params.minThreshold = minThreshold;
+// export async function fetchInsights({ category = null, minThreshold = null } = {}) {
+//   const params = {};
+//   if (category)     params.category     = category;
+//   if (minThreshold != null) params.minThreshold = minThreshold;
 
-  const response = await axios.get(`${BASE_URL}/insights`, { withCredentials: true, params });
-  return response.data; // { success, data, total, defaultThreshold }
-}
+//   const response = await axios.get(`${BASE_URL}/insights`, { withCredentials: true, params });
+//   return response.data; // { success, data, total, defaultThreshold }
+// }
 
 export async function dismissInsight(id) {
   const response = await axios.post(`${BASE_URL}/insights/${id}/dismiss`, {}, { withCredentials: true });
+  return response.data.data;
+}
+
+export async function fetchInsights(opts = {}) {
+  const { category = null, minThreshold = null, alertType = null, search = null,
+          sortBy = null, page = null, pageSize = null, skipRecompute = null } = opts;
+  const params = {};
+  if (category) params.category = category;
+  if (minThreshold != null) params.minThreshold = minThreshold;
+  if (alertType) params.alertType = alertType;
+  if (search) params.search = search;
+  if (sortBy) params.sortBy = sortBy;
+  if (page) params.page = page;
+  if (pageSize) params.pageSize = pageSize;
+  if (skipRecompute != null) params.skipRecompute = skipRecompute;
+
+  const response = await axios.get(`${BASE_URL}/insights`, { withCredentials: true, params });
+  return response.data;
+}
+
+export async function bulkDismissInsights(ids) {
+  const response = await axios.post(`${BASE_URL}/insights/dismiss-bulk`, { ids }, { withCredentials: true });
   return response.data.data;
 }
