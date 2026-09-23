@@ -376,6 +376,15 @@ export async function fetchInsights(opts = {}) {
   return response.data;
 }
 
+
+
+export async function fetchTakeActionContext(skuId) {
+  const response = await axios.get(`${BASE_URL}/insights/take-action/${skuId}`, { withCredentials: true });
+  return response.data.data; // { skuId, title, category, pp, sp, recommendedSP, lowestCompetitorPrice, competitorPriceAsOf }
+}
+
+
+
 export async function bulkDismissInsights(ids) {
   const response = await axios.post(`${BASE_URL}/insights/dismiss-bulk`, { ids }, { withCredentials: true });
   return response.data.data;
