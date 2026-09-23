@@ -17,6 +17,7 @@ export const VIEW = {
   USER_MGMT: "/user-management",
   SETTINGS: "/settings",
   SCRAPE_STATS: "/scrape-stats",
+  INSIGHTS: "/insights",
 };
 
 export default function Header({
@@ -29,7 +30,7 @@ export default function Header({
   lastRefreshed,
   showInternalView,
   onRecalcDone,
-  onAlertTakeAction
+  onAlertTakeAction,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
@@ -165,6 +166,22 @@ export default function Header({
           />
 
           <NavItem
+            active={view === VIEW.INSIGHTS}
+            onClick={() => go(VIEW.INSIGHTS)}
+            color="bg-red-900/60 border-red-700/60 text-red-400"
+            label="Insights"
+            sub="Price, stock & listing alerts"
+            icon={
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+              />
+            }
+          />
+
+          <NavItem
             active={view === VIEW.SCRAPE_STATS}
             onClick={() => go(VIEW.SCRAPE_STATS)}
             color="bg-amber-900/60 border-amber-700/60 text-amber-400"
@@ -208,23 +225,48 @@ export default function Header({
   // no full-width bar, no branding row ──────────────────────────
   if (!isHome) {
     return (
-      <div className="fixed top-3 right-3 sm:top-4 sm:right-4 z-40" ref={menuRef}>
+      <div
+        className="fixed top-3 right-3 sm:top-4 sm:right-4 z-40"
+        ref={menuRef}
+      >
         <div className="relative">
           <button
             onClick={() => setMenuOpen((v) => !v)}
             className={`flex items-center justify-center w-9 h-9 rounded-lg shadow-lg border transition-colors
-              ${menuOpen
-                ? "bg-slate-600 border-slate-500 text-white"
-                : "bg-slate-800/90 backdrop-blur border-slate-700 hover:bg-slate-700 text-slate-300"}`}
+              ${
+                menuOpen
+                  ? "bg-slate-600 border-slate-500 text-white"
+                  : "bg-slate-800/90 backdrop-blur border-slate-700 hover:bg-slate-700 text-slate-300"
+              }`}
             aria-label="Menu"
           >
             {menuOpen ? (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             ) : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 6h16M4 12h16M4 18h16"
+                />
               </svg>
             )}
           </button>
@@ -311,10 +353,11 @@ export default function Header({
           {/* Recalculate — only for the main (non-internal) recommendation view */}
           {!showInternalView && <RecalculateButton onDone={onRecalcDone} />}
 
-
           {/* Alerts bell */}
-<AlertBell navigate={navigate} onTakeAction={onAlertTakeAction} />
-
+          <AlertBell
+            onTakeAction={onAlertTakeAction}
+            onViewAll={() => go(VIEW.INSIGHTS)}
+          />
 
           {/* ── Hamburger menu ── */}
           <div className="relative" ref={menuRef}>
@@ -325,7 +368,12 @@ export default function Header({
               aria-label="Menu"
             >
               {menuOpen ? (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -334,7 +382,12 @@ export default function Header({
                   />
                 </svg>
               ) : (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -364,7 +417,12 @@ function NavItem({ active, onClick, color, label, sub, icon }) {
       <div
         className={`w-6 h-6 rounded-md border flex items-center justify-center flex-shrink-0 ${color}`}
       >
-        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg
+          className="w-3 h-3"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
           {icon}
         </svg>
       </div>

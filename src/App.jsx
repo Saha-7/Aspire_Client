@@ -18,6 +18,7 @@ import UserManagementView from "./components/UserManagementView";
 import ScrapeStatsView from "./components/ScrapeStatsView";
 import { PushLockProvider } from "./context/PushLockContext";
 import Header, { VIEW } from "./components/Header";
+import InsightsView from "./components/insights/InsightsView";
 //import RunScraperButton from "./components/RunScraperButton";
 
 export default function App() {
@@ -254,6 +255,14 @@ function AppInner() {
       {view === VIEW.SETTINGS && (
         <SettingsView onClose={() => navigate(VIEW.HOME)} user={user} />
       )}
+
+      {view === VIEW.INSIGHTS && (
+  <InsightsView onTakeAction={(alert) => {
+    navigate(VIEW.HOME);
+    setShowInternalView(false);
+    setSearchQuery(alert.SKU_ID);
+  }} />
+)}
 
       {view === VIEW.SCRAPE_STATS && (
         <ScrapeStatsView onClose={() => navigate(VIEW.HOME)} user={user} />

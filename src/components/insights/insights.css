@@ -1,0 +1,88 @@
+/* src/components/insights/insights.css
+   Deliberately its own light theme, separate from the app's dark
+   violet/slate Tailwind styling elsewhere — per explicit request, this
+   page should look like the shared mockup, not match the existing app. */
+
+.ins-page {
+  background: #0f1117;
+  min-height: 100vh;
+  padding: 24px;
+  padding-right: 88px; /* clears the app's fixed top-right hamburger button on non-Home views */
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #f1f5f9;
+}
+
+.ins-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.ins-title { font-size: 20px; font-weight: 600; display: flex; align-items: center; gap: 8px; color: #f8fafc; }
+.ins-export-btn {
+  background: #1e293b; border: 1px solid #334155; color: #cbd5e1; border-radius: 8px;
+  padding: 8px 14px; font-size: 13px; cursor: pointer;
+}
+.ins-export-btn:hover { background: #334155; }
+.ins-export-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ins-summary-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;
+}
+.ins-summary-card {
+  text-align: left; background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+  padding: 14px; cursor: pointer; transition: border-color 0.15s, background 0.15s;
+}
+.ins-summary-card:hover { border-color: #475569; }
+.ins-summary-card.active { border: 2px solid #8b5cf6; background: rgba(139, 92, 246, 0.12); }
+.ins-summary-label { font-size: 13px; color: #94a3b8; margin-bottom: 4px; }
+.ins-summary-value { font-size: 22px; font-weight: 600; color: #f1f5f9; }
+
+.ins-tabs { display: flex; gap: 20px; border-bottom: 1px solid #334155; margin-bottom: 14px; }
+.ins-tab {
+  padding: 8px 2px; font-size: 14px; color: #94a3b8; cursor: pointer;
+  border: none; border-bottom: 2px solid transparent; background: none;
+}
+.ins-tab.active { color: #a78bfa; border-bottom-color: #8b5cf6; font-weight: 500; }
+
+.ins-filterbar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.ins-filterbar input, .ins-filterbar select {
+  border: 1px solid #334155; border-radius: 6px; padding: 7px 10px; font-size: 13px;
+  background: #1e293b; color: #e2e8f0;
+}
+.ins-filterbar input::placeholder { color: #64748b; }
+.ins-filterbar input { flex: 1; min-width: 200px; max-width: 260px; }
+
+.ins-table-wrap {
+  background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+  padding: 4px 14px; overflow-x: auto;
+}
+.ins-table { width: 100%; border-collapse: collapse; font-size: 13px; color: #e2e8f0; }
+.ins-table th {
+  text-align: left; color: #94a3b8; font-weight: 400; padding: 10px 6px; border-bottom: 1px solid #334155;
+}
+.ins-table td { padding: 12px 6px; border-bottom: 1px solid #293548; vertical-align: top; }
+.ins-table tr:last-child td { border-bottom: none; }
+
+.ins-diff-up { color: #f87171; font-weight: 600; }
+.ins-diff-down { color: #34d399; font-weight: 600; }
+.ins-muted { color: #64748b; }
+
+.ins-link { color: #a78bfa; text-decoration: none; font-weight: 500; cursor: pointer; }
+.ins-link:hover { text-decoration: underline; color: #c4b5fd; }
+.ins-link-muted { color: #64748b; text-decoration: none; cursor: pointer; }
+.ins-link-muted:hover { text-decoration: underline; color: #94a3b8; }
+
+.ins-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 13px; color: #94a3b8; margin-top: 12px; flex-wrap: wrap; gap: 8px;
+}
+.ins-empty { text-align: center; padding: 48px 0; color: #64748b; font-size: 14px; }
+
+.ins-pagination { display: flex; gap: 6px; align-items: center; }
+.ins-pagination button {
+  border: 1px solid #334155; background: #1e293b; color: #cbd5e1; border-radius: 6px; padding: 4px 10px;
+  font-size: 13px; cursor: pointer;
+}
+.ins-pagination button:hover:not(:disabled) { background: #334155; }
+.ins-pagination button:disabled { opacity: 0.4; cursor: default; }
