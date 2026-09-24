@@ -1,6 +1,7 @@
 // src/App.jsx
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { ToastProvider } from "./context/ToastContext";
 import PriceTable from "./components/Pricetable";
 import InternalRecommendationsTable from "./components/InternalRecommendationsTable";
 import SearchBar from "./components/SearchBar";
@@ -23,9 +24,11 @@ import InsightsView from "./components/insights/InsightsView";
 
 export default function App() {
   return (
-    <PushLockProvider>
+    <ToastProvider>
+      <PushLockProvider>
       <AppInner />
     </PushLockProvider>
+    </ToastProvider>
   );
 }
 
