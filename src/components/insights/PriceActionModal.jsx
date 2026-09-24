@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import { fetchTakeActionContext, updatePP } from "../../services/api";
 import TakeActionCell from "../TakeActionCell";
+import { formatINR } from "./alertFormatters";
 
 // Strips the "- Default Title" suffix Shopify tacks onto single-variant
 // products — noise for a modal that already shows SKU + Category up top.
