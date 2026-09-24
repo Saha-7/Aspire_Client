@@ -15,7 +15,7 @@ function tabToAlertType(tab) {
 }
 
 export default function useInsightsData() {
-  const [tab, setTab] = useState("all");
+  const [tab, setTab] = useState("price");
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [sortBy, setSortBy] = useState("newest");
