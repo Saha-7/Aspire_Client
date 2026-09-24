@@ -62,3 +62,10 @@ export function describeAlert(alert) {
 export function canTakeAction(alert) {
   return alert.AlertType === "LOW_PRICE" || alert.AlertType === "HIGH_PRICE";
 }
+
+
+
+// add to src/components/insights/alertFormatters.js (or a shared utils file)
+export function formatINR(value) {
+  return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
