@@ -154,9 +154,20 @@ export default function PriceActionModal({ skuId, category: fallbackCategory, on
                   </div>
                 ) : (
                   <div className="flex items-center gap-2.5">
-                    <span className="text-base text-slate-100 font-medium">
+
+                    <span
+  className={`text-base ${
+    context.pp != null
+      ? "text-slate-100 font-medium"
+      : "text-red-500 font-extrabold"
+  }`}
+>
+  {context.pp != null ? `₹${context.pp.toLocaleString()}` : "Not set"}
+</span>
+
+                    {/* <span className="text-base font-extrabold text-red-500">
                       {context.pp != null ? `₹${context.pp.toLocaleString()}` : "Not set"}
-                    </span>
+                    </span> */}
                     <button
                       onClick={() => { setPpEditing(true); setPpInput(context.pp ?? ""); }}
                       className="text-slate-400 hover:text-teal-400 transition-colors cursor-pointer"
@@ -178,12 +189,25 @@ export default function PriceActionModal({ skuId, category: fallbackCategory, on
               {/* Recommended SP — GST/COB/margin breakdown shows on hover, not permanently */}
               <div className="flex items-center justify-between py-1">
                 <span className="text-sm text-slate-400">Recommended Selling Price</span>
-                <span
-                  className={`text-lg text-slate-100 font-semibold ${breakdownTooltip ? "cursor-help" : ""}`}
+
+                {/* <span
+                  className={`text-lg text-red-500 font-semibold ${breakdownTooltip ? "cursor-help" : ""}`}
                   title={breakdownTooltip}
                 >
                   {context.recommendedSP != null ? `₹${context.recommendedSP.toLocaleString()}` : "Set PP first"}
-                </span>
+                </span> */}
+
+                <span
+  className={`text-lg ${
+    context.recommendedSP != null
+      ? "text-slate-100 font-semibold"
+      : "text-red-500 font-extrabold"
+  } ${breakdownTooltip ? "cursor-help" : ""}`}
+  title={breakdownTooltip}
+>
+  {context.recommendedSP != null ? `₹${context.recommendedSP.toLocaleString()}` : "Set PP first"}
+</span>
+
               </div>
 
               <div className="border-t border-slate-700/60" />
