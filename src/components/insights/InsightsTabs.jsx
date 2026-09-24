@@ -1,6 +1,5 @@
 // src/components/insights/InsightsTabs.jsx
 const TABS = [
-  { key: "all", label: "All" },
   { key: "price", label: "Price alerts" },
   { key: "oos", label: "Out of stock" },
   { key: "listing", label: "Not in catalog" },
