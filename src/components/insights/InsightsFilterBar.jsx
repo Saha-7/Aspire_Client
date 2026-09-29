@@ -1,17 +1,12 @@
 // src/components/insights/InsightsFilterBar.jsx
+import SearchableSelect from "../SearchableSelect";
+
 export default function InsightsFilterBar({
   search, onSearch,
   category, onCategory, categories,
+  brand, onBrand, brands,
   sortBy, onSort,
 }) {
-  // Keep the selected category in the option list even if the current tab has
-  // no alerts for it (e.g. after switching tabs) so the <select> never shows
-  // a value that doesn't match its state.
-  const options =
-    category && !categories.includes(category)
-      ? [...categories, category].sort()
-      : categories;
-
   return (
     <div className="ins-filterbar">
       <input
@@ -20,12 +15,22 @@ export default function InsightsFilterBar({
         value={search}
         onChange={(e) => onSearch(e.target.value)}
       />
-      <select value={category} onChange={(e) => onCategory(e.target.value)}>
-        <option value="">All categories</option>
-        {options.map((c) => (
-          <option key={c} value={c}>{c}</option>
-        ))}
-      </select>
+      {/* SearchableSelect keeps the selected value in its list even when the
+          current tab has no alerts for it, so it never shows a stale label. */}
+      <SearchableSelect
+        options={categories}
+        value={category}
+        onChange={onCategory}
+        allLabel="All categories"
+        searchPlaceholder="Search category..."
+      />
+      <SearchableSelect
+        options={brands || []}
+        value={brand}
+        onChange={onBrand}
+        allLabel="All brands"
+        searchPlaceholder="Search brand..."
+      />
       <select value={sortBy} onChange={(e) => onSort(e.target.value)}>
         <option value="newest">Newest first</option>
         <option value="diff">Biggest diff</option>
@@ -61,10 +66,25 @@ export default function InsightsFilterBar({
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 // // src/components/insights/InsightsFilterBar.jsx
+// import SearchableSelect from "../SearchableSelect";
+
 // export default function InsightsFilterBar({
 //   search, onSearch,
 //   category, onCategory, categories,
+//   brand, onBrand, brands,
 //   sortBy, onSort,
 // }) {
 //   return (
@@ -75,12 +95,22 @@ export default function InsightsFilterBar({
 //         value={search}
 //         onChange={(e) => onSearch(e.target.value)}
 //       />
-//       <select value={category} onChange={(e) => onCategory(e.target.value)}>
-//         <option value="">All categories</option>
-//         {categories.map((c) => (
-//           <option key={c} value={c}>{c}</option>
-//         ))}
-//       </select>
+//       {/* SearchableSelect keeps the selected value in its list even when the
+//           current tab has no alerts for it, so it never shows a stale label. */}
+//       <SearchableSelect
+//         options={categories}
+//         value={category}
+//         onChange={onCategory}
+//         allLabel="All categories"
+//         searchPlaceholder="Search category..."
+//       />
+//       <SearchableSelect
+//         options={brands || []}
+//         value={brand}
+//         onChange={onBrand}
+//         allLabel="All brands"
+//         searchPlaceholder="Search brand..."
+//       />
 //       <select value={sortBy} onChange={(e) => onSort(e.target.value)}>
 //         <option value="newest">Newest first</option>
 //         <option value="diff">Biggest diff</option>
