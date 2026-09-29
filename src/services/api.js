@@ -360,10 +360,11 @@ export async function dismissInsight(id) {
 }
 
 export async function fetchInsights(opts = {}) {
-  const { category = null, minThreshold = null, alertType = null, search = null,
+  const { category = null, brand = null, minThreshold = null, alertType = null, search = null,
           sortBy = null, page = null, pageSize = null, skipRecompute = null } = opts;
   const params = {};
   if (category) params.category = category;
+  if (brand) params.brand = brand;
   if (minThreshold != null) params.minThreshold = minThreshold;
   if (alertType) params.alertType = alertType;
   if (search) params.search = search;
