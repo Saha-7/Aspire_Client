@@ -43,6 +43,7 @@ function AppInner() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedBrand, setSelectedBrand] = useState("");
+  const [ppFilter, setPpFilter] = useState("all"); // 'all' | 'available' | 'unavailable' — Basic Recommendations only
   // ── view is derived from the URL, not separate state ──
   const navigate = useNavigate();
   const location = useLocation();
@@ -156,18 +157,29 @@ function AppInner() {
       result = result.filter((r) => r.Category === selectedCategory);
     if (selectedBrand)
       result = result.filter((r) => r.Brand === selectedBrand);
+    if (showInternalView && ppFilter !== "all") {
+      result = result.filter((r) =>
+        ppFilter === "available" ? r.PP != null : r.PP == null
+      );
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter((r) => (r.SKU_ID || "").toLowerCase().includes(q));
     }
     return result;
-  }, [data, internalData, showInternalView, searchQuery, selectedCategory, selectedBrand]);
+  }, [data, internalData, showInternalView, searchQuery, selectedCategory, selectedBrand, ppFilter]);
 
   const totalProducts = data.length;
   const optimizedCount = data.filter((r) => r.ExtraProfitPct > 0).length;
   const floorCount = totalProducts - optimizedCount;
 
+  // Node's mssql driver returns SQL `bit` as a real boolean, but treat 1 / "1"
+  // as "on" too so this stays correct regardless of how a row got here.
+  const isOn = (v) => v === 1 || v === true || v === "1";
   const totalInternalProducts = internalData.length;
+  const internalOutOfStockCount = internalData.filter((r) => !isOn(r.isInStock)).length;
+  const internalInactiveCount = internalData.filter((r) => !isOn(r.isActive)).length;
+  const internalNoPPCount = internalData.filter((r) => r.PP == null).length;
 
   const currentLoading = showInternalView ? internalLoading : loading;
   const currentError = showInternalView ? internalError : error;
@@ -300,12 +312,28 @@ function AppInner() {
           {!currentLoading &&
             !currentError &&
             (showInternalView ? (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                 <StatCard
-                  label="Total Eligible Products"
+                  label="Total Products"
                   value={totalInternalProducts}
-                  sub="PP available + Active + In Stock"
+                  sub="All internal products"
                   color="violet"
+                />
+                <StatCard
+                  label="Out of Stock"
+                  value={internalOutOfStockCount}
+                  color="amber"
+                />
+                <StatCard
+                  label="Inactive"
+                  value={internalInactiveCount}
+                  color="amber"
+                />
+                <StatCard
+                  label="No PP Set"
+                  value={internalNoPPCount}
+                  sub="Bill price not received"
+                  color="sky"
                 />
               </div>
             ) : (
@@ -350,7 +378,7 @@ function AppInner() {
           {!currentLoading && !currentError && currentSourceLength === 0 && (
             <div className="text-center py-24 text-slate-500">
               {showInternalView
-                ? "No eligible internal products found (need PP + Active + In Stock)."
+                ? "No internal products found."
                 : "No recommendations found. Run the recommendation engine first."}
             </div>
           )}
@@ -370,6 +398,23 @@ function AppInner() {
                     value={selectedBrand}
                     onChange={setSelectedBrand}
                   />
+
+                  {showInternalView && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-slate-500">PP:</span>
+                      <select
+                        value={ppFilter}
+                        onChange={(e) => setPpFilter(e.target.value)}
+                        className="pl-2 pr-6 py-1.5 text-xs text-slate-200 bg-slate-800 border border-slate-700
+                          rounded-lg outline-none cursor-pointer focus:border-violet-500 focus:ring-1
+                          focus:ring-violet-500/40 transition-colors"
+                      >
+                        <option value="all">All PP</option>
+                        <option value="available">PP available</option>
+                        <option value="unavailable">PP not available</option>
+                      </select>
+                    </div>
+                  )}
 
                   {/* ── Internal Products RecommendedSP toggle ── */}
                   <button
@@ -399,12 +444,13 @@ function AppInner() {
                   </button>
                 </div>
                 <div className="flex items-center gap-2">
-                  {(searchQuery || selectedCategory || selectedBrand) && (
+                  {(searchQuery || selectedCategory || selectedBrand || (showInternalView && ppFilter !== "all")) && (
                     <button
                       onClick={() => {
                         setSearchQuery("");
                         setSelectedCategory("");
                         setSelectedBrand("");
+                        setPpFilter("all");
                       }}
                       className="text-xs text-slate-500 hover:text-slate-300 underline underline-offset-2 transition-colors"
                     >
@@ -427,6 +473,7 @@ function AppInner() {
                       setSearchQuery("");
                       setSelectedCategory("");
                       setSelectedBrand("");
+                      setPpFilter("all");
                     }}
                     className="mt-2 text-xs text-violet-400 hover:text-violet-300 transition-colors"
                   >
@@ -501,6 +548,43 @@ function StatCard({ label, value, sub, color }) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // // src/App.jsx
 // import { useEffect, useState, useMemo } from "react";
 // import { useNavigate, useLocation } from "react-router-dom";
@@ -509,6 +593,7 @@ function StatCard({ label, value, sub, color }) {
 // import InternalRecommendationsTable from "./components/InternalRecommendationsTable";
 // import SearchBar from "./components/SearchBar";
 // import CategoryFilter from "./components/CategoryFilter";
+// import BrandFilter from "./components/BrandFilter";
 // import PPUpdateView from "./components/PPUpdateView";
 // import BulkPPUpdateView from "./components/BulkPPUpdateView";
 // import {
@@ -544,6 +629,7 @@ function StatCard({ label, value, sub, color }) {
 //   const [lastRefreshed, setLastRefreshed] = useState(null);
 //   const [searchQuery, setSearchQuery] = useState("");
 //   const [selectedCategory, setSelectedCategory] = useState("");
+//   const [selectedBrand, setSelectedBrand] = useState("");
 //   // ── view is derived from the URL, not separate state ──
 //   const navigate = useNavigate();
 //   const location = useLocation();
@@ -627,22 +713,42 @@ function StatCard({ label, value, sub, color }) {
 //     setSelectedCategory(category);
 //   }
 
+//   // Category and Brand narrow each other: the Category list only shows
+//   // categories that have the selected brand, and the Brand list only shows
+//   // brands that exist in the selected category.
 //   const categories = useMemo(() => {
 //     const source = showInternalView ? internalData : data;
-//     const cats = [...new Set(source.map((r) => r.Category).filter(Boolean))];
+//     const rows = selectedBrand ? source.filter((r) => r.Brand === selectedBrand) : source;
+//     const cats = [...new Set(rows.map((r) => r.Category).filter(Boolean))];
 //     return cats.sort((a, b) => a.localeCompare(b));
-//   }, [data, internalData, showInternalView]);
+//   }, [data, internalData, showInternalView, selectedBrand]);
+
+//   const brands = useMemo(() => {
+//     const source = showInternalView ? internalData : data;
+//     const rows = selectedCategory ? source.filter((r) => r.Category === selectedCategory) : source;
+//     const list = [...new Set(rows.map((r) => r.Brand).filter(Boolean))];
+//     return list.sort((a, b) => a.localeCompare(b));
+//   }, [data, internalData, showInternalView, selectedCategory]);
+
+//   // Switching between Basic / Intelligence changes the data set - drop a
+//   // selection that no longer exists there instead of showing an empty table.
+//   useEffect(() => {
+//     if (selectedBrand && !brands.includes(selectedBrand)) setSelectedBrand("");
+//     if (selectedCategory && !categories.includes(selectedCategory)) setSelectedCategory("");
+//   }, [brands, categories, selectedBrand, selectedCategory]);
 
 //   const filteredData = useMemo(() => {
 //     let result = showInternalView ? internalData : data;
 //     if (selectedCategory)
 //       result = result.filter((r) => r.Category === selectedCategory);
+//     if (selectedBrand)
+//       result = result.filter((r) => r.Brand === selectedBrand);
 //     if (searchQuery) {
 //       const q = searchQuery.toLowerCase();
 //       result = result.filter((r) => (r.SKU_ID || "").toLowerCase().includes(q));
 //     }
 //     return result;
-//   }, [data, internalData, showInternalView, searchQuery, selectedCategory]);
+//   }, [data, internalData, showInternalView, searchQuery, selectedCategory, selectedBrand]);
 
 //   const totalProducts = data.length;
 //   const optimizedCount = data.filter((r) => r.ExtraProfitPct > 0).length;
@@ -846,6 +952,11 @@ function StatCard({ label, value, sub, color }) {
 //                     value={selectedCategory}
 //                     onChange={handleCategoryChange}
 //                   />
+//                   <BrandFilter
+//                     brands={brands}
+//                     value={selectedBrand}
+//                     onChange={setSelectedBrand}
+//                   />
 
 //                   {/* ── Internal Products RecommendedSP toggle ── */}
 //                   <button
@@ -875,11 +986,12 @@ function StatCard({ label, value, sub, color }) {
 //                   </button>
 //                 </div>
 //                 <div className="flex items-center gap-2">
-//                   {(searchQuery || selectedCategory) && (
+//                   {(searchQuery || selectedCategory || selectedBrand) && (
 //                     <button
 //                       onClick={() => {
 //                         setSearchQuery("");
 //                         setSelectedCategory("");
+//                         setSelectedBrand("");
 //                       }}
 //                       className="text-xs text-slate-500 hover:text-slate-300 underline underline-offset-2 transition-colors"
 //                     >
@@ -901,6 +1013,7 @@ function StatCard({ label, value, sub, color }) {
 //                     onClick={() => {
 //                       setSearchQuery("");
 //                       setSelectedCategory("");
+//                       setSelectedBrand("");
 //                     }}
 //                     className="mt-2 text-xs text-violet-400 hover:text-violet-300 transition-colors"
 //                   >
