@@ -1,10 +1,12 @@
 // src/components/insights/InsightsFilterBar.jsx
 import SearchableSelect from "../SearchableSelect";
+import { TIME_RANGES } from "./useInsightsData";
 
 export default function InsightsFilterBar({
   search, onSearch,
   category, onCategory, categories,
   brand, onBrand, brands,
+  days, onDays,
   sortBy, onSort,
 }) {
   return (
@@ -31,6 +33,17 @@ export default function InsightsFilterBar({
         allLabel="All brands"
         searchPlaceholder="Search brand..."
       />
+      <select
+        value={days}
+        onChange={(e) => onDays(e.target.value)}
+        aria-label="Time range"
+        title="Show alerts that appeared or changed within this period"
+      >
+        {TIME_RANGES.map((t) => (
+          <option key={t.value} value={t.value}>{t.label}</option>
+        ))}
+      </select>
+      {/* Sort is unchanged for now (paused). */}
       <select value={sortBy} onChange={(e) => onSort(e.target.value)}>
         <option value="newest">Newest first</option>
         <option value="diff">Biggest diff</option>
@@ -38,15 +51,6 @@ export default function InsightsFilterBar({
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
 
 
 
