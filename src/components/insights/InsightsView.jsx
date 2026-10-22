@@ -1,6 +1,6 @@
 // src/components/insights/InsightsView.jsx
 // The full-page Insights dashboard, reached via the bell's "View all →"
-// link or the nav menu. Deliberately its own light theme — see insights.css.
+// link or the nav menu. Deliberately its own theme — see insights.css.
 
 import "./insights.css";
 import { useState } from "react";
@@ -10,47 +10,58 @@ import InsightsTabs from "./InsightsTabs";
 import InsightsFilterBar from "./InsightsFilterBar";
 import InsightsTable from "./InsightsTable";
 import PriceActionModal from "./PriceActionModal";
+import { downloadInsightsExportCsv } from "../../services/api";
 
 const PAGE_SIZE = 25;
 
+// CSV is offered for these two tabs only.
+const EXPORT_NAMES = { oos: "out_of_stock", listing: "not_in_catalog" };
+
 export default function InsightsView() {
   const {
-    tab,
-    setTab,
-    search,
-    setSearch,
-    category,
-    setCategory,
-    brand,
-    setBrand,
-    sortBy,
-    setSortBy,
-    page,
-    setPage,
-    rows,
-    counts,
-    categories,
-    brands,
-    total,
-    totalPages,
-    loading,
-    error,
-    selectedIds,
-    toggleSelect,
-    toggleSelectAll,
-    dismiss,
-    dismissSelected,
+    tab, setTab,
+    search, setSearch,
+    category, setCategory,
+    brand, setBrand,
+    days, setDays,
+    sortBy, setSortBy,
+    page, setPage,
+    rows, counts, categories, brands, total, totalPages, loading, error,
+    selectedIds, toggleSelect, toggleSelectAll, dismiss, dismissSelected,
     reload,
+    exportParams,
   } = useInsightsData();
 
-  // Which alert's modal is open, if any — lives here (not in App.jsx) since
-  // this is now fully self-contained: no more navigating away to the
-  // Intelligence dashboard, which could come up empty for a SKU that fails
-  // one of that dashboard's display conditions.
+  // Which alert's modal is open, if any.
   const [activeAlert, setActiveAlert] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState(null);
 
   const rangeStart = rows.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const rangeEnd = (page - 1) * PAGE_SIZE + rows.length;
+
+  const canExport = tab === "oos" || tab === "listing";
+
+  async function handleExport() {
+    if (!canExport || exporting) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const blob = await downloadInsightsExportCsv(exportParams);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `insights_${EXPORT_NAMES[tab]}_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setExportError("Export failed. Please try again.");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <div className="ins-page">
@@ -72,25 +83,37 @@ export default function InsightsView() {
           </svg>
           Insights
         </div>
-        {/* Not wired yet — needs a /api/insights/export CSV route */}
-        <button className="ins-export-btn" disabled title="Coming soon">
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            style={{ verticalAlign: "-2px", marginRight: 4 }}
+
+        <div>
+          {exportError && <span className="ins-export-error">{exportError}</span>}
+          <button
+            className="ins-export-btn"
+            onClick={handleExport}
+            disabled={!canExport || exporting || total === 0}
+            title={
+              canExport
+                ? "Download everything matching the current filters as CSV"
+                : "CSV export is available for Out of stock and Not in catalog"
+            }
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"
-            />
-          </svg>
-          Export CSV
-        </button>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              style={{ verticalAlign: "-2px", marginRight: 4 }}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"
+              />
+            </svg>
+            {exporting ? "Exporting…" : "Export CSV"}
+          </button>
+        </div>
       </div>
 
       <InsightsSummaryCards counts={counts} activeTab={tab} onSelect={setTab} />
@@ -104,6 +127,8 @@ export default function InsightsView() {
         brand={brand}
         onBrand={setBrand}
         brands={brands}
+        days={days}
+        onDays={setDays}
         sortBy={sortBy}
         onSort={setSortBy}
       />
@@ -140,19 +165,13 @@ export default function InsightsView() {
                 )}
               </span>
               <div className="ins-pagination">
-                <button
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => p - 1)}
-                >
+                <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
                   Prev
                 </button>
                 <span>
                   {page} / {totalPages}
                 </span>
-                <button
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                >
+                <button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
                   Next
                 </button>
               </div>
@@ -172,6 +191,11 @@ export default function InsightsView() {
     </div>
   );
 }
+
+
+
+
+
 
 
 
@@ -226,6 +250,8 @@ export default function InsightsView() {
 //     setSearch,
 //     category,
 //     setCategory,
+//     brand,
+//     setBrand,
 //     sortBy,
 //     setSortBy,
 //     page,
@@ -233,6 +259,7 @@ export default function InsightsView() {
 //     rows,
 //     counts,
 //     categories,
+//     brands,
 //     total,
 //     totalPages,
 //     loading,
@@ -303,6 +330,9 @@ export default function InsightsView() {
 //         category={category}
 //         onCategory={setCategory}
 //         categories={categories}
+//         brand={brand}
+//         onBrand={setBrand}
+//         brands={brands}
 //         sortBy={sortBy}
 //         onSort={setSortBy}
 //       />
@@ -371,4 +401,3 @@ export default function InsightsView() {
 //     </div>
 //   );
 // }
-
