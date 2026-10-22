@@ -15,7 +15,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useState, useRef } from 'react';
-import { downloadPPTemplate, validateBulkPP, bulkUpdatePP } from '../services/api';
+import { downloadPPTemplate, validateBulkPP, bulkUpdatePP, fetchStockSnapshot, bulkUpdateStock } from '../services/api';
 
 // ── Stage constants ───────────────────────────────────────────
 const STAGE = { UPLOAD: 'upload', PREVIEW: 'preview', DONE: 'done' };
@@ -33,7 +33,52 @@ function calcPctChange(currentPP, newPP) {
   return ((newPP - currentPP) / currentPP) * 100;
 }
 
-// ── Parse CSV text → array of { sku, pp, rawPP, rowNum, errors } ──
+// Turn an axios error into a sentence a non-technical user can act on.
+function apiErrorText(err, fallback) {
+  if (err?.response?.data?.error) return err.response.data.error;
+  if (!err?.response) return 'Could not reach the server. Please check your internet connection and try again.';
+  return fallback;
+}
+
+// Live Shopify stock is read for every uploaded SKU, so stock uploads are capped
+// (keep in sync with the 500-row limit on /api/bulk-update-stock).
+const MAX_STOCK_SKUS = 500;
+
+// ── CSV helpers ───────────────────────────────────────────────
+// Split one CSV line honouring "quoted, cells" and "" escapes.
+function splitCSVLine(line) {
+  const out = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; } else { inQ = false; }
+      } else {
+        cur += c;
+      }
+    } else if (c === '"') {
+      inQ = true;
+    } else if (c === ',') {
+      out.push(cur);
+      cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+const DUP_MSG = 'This SKU appears more than once in the file. Keep only one row per SKU.';
+const cleanCell = (v) => String(v ?? '').replace(/[^\x20-\x7E]/g, '').trim();
+
+// ── Parse CSV text → { rows, locations, fileErrors } ──────────
+// Columns: SKU, PP, then ANY number of location columns (Delhi, Mumbai, ...).
+//   - blank PP        → PP not touched for that row
+//   - blank location cell → no action (active or inactive); type 0 to set stock to 0
+//   - location cell:  number → stock (0 = active, no stock) · NA → location inactive
+//                     blank  → no action
 // Strips UTF-8 BOM that Excel adds.
 function parseCSV(text) {
   const cleaned = text.replace(/^\uFEFF/, '');
@@ -44,52 +89,66 @@ function parseCSV(text) {
     .filter(l => l.length > 0);
 
   if (lines.length === 0) {
-    return { rows: [], fileErrors: ['The file is empty.'] };
+    return { rows: [], locations: [], fileErrors: ['This file is empty. Please download the template, fill it in and upload it again.'] };
   }
 
-  const headers = lines[0]
-    .split(',')
-    .map(h => h.replace(/[^\x20-\x7E]/g, '').trim().toLowerCase());
+  const headerCells = splitCSVLine(lines[0]).map(cleanCell);
 
-  if (headers[0] !== 'sku' || headers[1] !== 'pp') {
+  if (headerCells[0]?.toLowerCase() !== 'sku' || headerCells[1]?.toLowerCase() !== 'pp') {
     return {
-      rows: [],
+      rows: [], locations: [],
       fileErrors: [
-        `Invalid headers. Expected "SKU,PP" but got "${lines[0].replace(/[^\x20-\x7E]/g, '')}". ` +
-        'Download the template and use it as the starting point.',
+        'The first two columns of the file must be named SKU and PP (in that order), followed by one column per location. ' +
+        'Please download the template and start from it.',
       ],
     };
   }
 
+  // Location columns = every non-empty header after SKU and PP
+  const locations = []; // [{ name, idx }]
+  const seenLoc = new Set();
+  for (let c = 2; c < headerCells.length; c++) {
+    const name = headerCells[c];
+    if (!name) continue;
+    if (seenLoc.has(name.toLowerCase())) {
+      return { rows: [], locations: [], fileErrors: [`The location "${name}" appears in more than one column. Keep only one column per location.`] };
+    }
+    seenLoc.add(name.toLowerCase());
+    locations.push({ name, idx: c });
+  }
+  const hasLocations = locations.length > 0;
+
   if (lines.length === 1) {
-    return { rows: [], fileErrors: ['The file has headers but no data rows.'] };
+    return { rows: [], locations: [], fileErrors: ['The file has the column names but no rows below them. Add at least one SKU row and upload again.'] };
   }
 
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
-    const parts = lines[i].split(',');
-    const rawSKU = (parts[0] ?? '').replace(/[^\x20-\x7E]/g, '').trim();
-    const rawPP  = (parts[1] ?? '').replace(/[^\x20-\x7E]/g, '').trim();
-    const rowNum = i + 1;
-    rows.push({ sku: rawSKU, rawPP, rowNum, errors: [] });
+    const parts = splitCSVLine(lines[i]);
+    const rawSKU = cleanCell(parts[0]);
+    const rawPP  = cleanCell(parts[1]);
+    const stock  = {};
+    for (const loc of locations) stock[loc.name] = cleanCell(parts[loc.idx]);
+    rows.push({ sku: rawSKU, rawPP, stock, rowNum: i + 1, errors: [] });
   }
 
-  // Duplicate-SKU check — only among rows that actually provide a PP.
-  // A row with no PP is skipped entirely (see below) and shouldn't cause
-  // a duplicate flag on a different row that IS being processed.
+  // A row is "active" if it provides a PP, or if the file has location
+  // columns (a blank location means 0, so the row always carries stock info).
+  const isActiveRow = (row) => (row.rawPP !== '' && row.rawPP !== null) || hasLocations;
+
+  // Duplicate-SKU check — only among active rows.
   const seenSKUs = new Map();
   for (let idx = 0; idx < rows.length; idx++) {
     const row = rows[idx];
-    const ppProvided = row.rawPP !== '' && row.rawPP !== null;
-    if (!ppProvided) continue;
+    if (!isActiveRow(row)) continue;
 
     const skuKey = row.sku.toLowerCase();
     if (seenSKUs.has(skuKey)) {
       const firstIdx = seenSKUs.get(skuKey);
-      if (!rows[firstIdx].errors.includes('Duplicate SKU')) {
-        rows[firstIdx].errors.push('Duplicate SKU');
+      if (!rows[firstIdx].errors.includes(DUP_MSG)) {
+        rows[firstIdx].errors.push(DUP_MSG);
       }
-      row.errors.push('Duplicate SKU');
+      row.errors.push(DUP_MSG);
     } else {
       seenSKUs.set(skuKey, idx);
     }
@@ -98,29 +157,73 @@ function parseCSV(text) {
   for (const row of rows) {
     const ppProvided = row.rawPP !== '' && row.rawPP !== null;
 
-    // No PP given for this SKU — not an error, just nothing to do. Leave
-    // it out of validation/import entirely; the sales rep may fill it in
-    // on a later upload.
-    if (!ppProvided) {
+    // Nothing to do for this row: no PP, and no stock typed in any location column.
+    const stockAllBlank = locations.every(loc => row.stock[loc.name] === '');
+    if (!ppProvided && stockAllBlank) {
       row.skipped = true;
       continue;
     }
 
     if (!row.sku) {
-      row.errors.push('SKU is empty');
+      row.errors.push('The SKU cell is empty. Fill in the SKU or delete this row.');
     }
 
-    const ppNum = parseFloat(row.rawPP);
-    if (isNaN(ppNum)) {
-      row.errors.push(`PP "${row.rawPP}" is not a number`);
-    } else if (ppNum <= 0) {
-      row.errors.push('PP must be greater than 0');
-    } else {
-      row.pp = ppNum;
+    if (ppProvided) {
+      const ppNum = parseFloat(row.rawPP);
+      if (isNaN(ppNum)) {
+        row.errors.push(`The purchase price "${row.rawPP}" is not a number. Use digits only, for example 1250.`);
+      } else if (ppNum <= 0) {
+        row.errors.push('The purchase price must be more than 0.');
+      } else {
+        row.pp = ppNum;
+      }
+    }
+
+    for (const loc of locations) {
+      const v = row.stock[loc.name];
+      if (v !== '' && !/^(na|n\/a)$/i.test(v) && !/^-?\d+$/.test(v)) {
+        row.errors.push(`${loc.name}: "${v}" is not valid. Use a whole number like 0, 5 or 12, NA, or leave it blank.`);
+      }
     }
   }
 
-  return { rows, fileErrors: [] };
+  return { rows, locations: locations.map(l => l.name), fileErrors: [] };
+}
+
+// ── Stock diff for one row against the live snapshot ──────────
+// snapshot.stock: { [skuLower]: { [locationName]: qty } }  - only ACTIVE locations
+// are present; a location missing there is inactive (NA).
+// Mirrors the server rules (inventoryService.decideCell); the server re-checks.
+//   active   + number  → set quantity       any location + blank → no action     active + NA → error
+//   inactive + number  → error (locations are activated in Shopify only)
+//   inactive + NA/blank → nothing
+function computeStockChanges(row, locations, snapshot) {
+  const changes = [];
+  const errors  = [];
+  if (!snapshot || locations.length === 0) return { changes, errors };
+
+  const levels = snapshot.stock[(row.sku || '').toLowerCase()] || {};
+  const byKey  = {};
+  for (const [name, qty] of Object.entries(levels)) byKey[name.toLowerCase()] = { name, qty };
+
+  for (const loc of locations) {
+    const raw  = (row.stock?.[loc] ?? '').trim();
+    const lv   = byKey[loc.toLowerCase()];
+    const isNA = /^(na|n\/a)$/i.test(raw);
+
+    if (lv) {                                   // location is active
+      if (isNA) { errors.push(`${loc}: this SKU is active here, so NA cannot be used (NA would switch the location off, which can't be done from this sheet). Type 0 if there is no stock, or leave the cell blank for no change.`); continue; }
+      if (raw === '') continue;                 // blank = no action
+      const newQty = parseInt(raw, 10);
+      if (newQty === lv.qty) continue;
+      if (newQty < 0) { errors.push(`${loc}: stock cannot be a negative number. Use 0 or a positive number.`); continue; }
+      changes.push({ loc: lv.name, oldQty: lv.qty, newQty, action: 'set' });
+    } else {                                    // location is inactive (NA)
+      if (isNA || raw === '') continue;
+      errors.push(`${loc}: this SKU is not active at ${loc} in Shopify, so stock can't be added here. Ask the Shopify team to activate it first, then upload again. Or leave the cell blank or NA.`);
+    }
+  }
+  return { changes, errors };
 }
 
 // ── Drop zone component ───────────────────────────────────────
@@ -242,7 +345,7 @@ function StatusBadge({ errors, isUnidentified, skipped }) {
         <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
-        Skipped — no PP provided
+        Skipped — nothing to update in this row
       </span>
     );
   }
@@ -251,8 +354,8 @@ function StatusBadge({ errors, isUnidentified, skipped }) {
     return (
       <div className="flex flex-col gap-0.5">
         {errors.map((e, i) => (
-          <span key={i} className="inline-flex items-center gap-1 text-[10px] font-medium text-red-400">
-            <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <span key={i} className="inline-flex items-start gap-1.5 text-xs leading-snug font-medium text-red-400 max-w-md">
+            <svg className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
             </svg>
             {e}
@@ -269,7 +372,7 @@ function StatusBadge({ errors, isUnidentified, skipped }) {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
             d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
         </svg>
-        SKU not found in system
+        This SKU was not found in the system
       </span>
     );
   }
@@ -296,6 +399,12 @@ export default function BulkPPUpdateView({ onClose, user }) {
   const [importing, setImporting]       = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [downloadLoading, setDownloadLoading] = useState(false);
+  // Per-location stock (only used when the CSV has location columns)
+  const [locations, setLocations]       = useState([]);       // location header names from the file
+  const [stockSnapshot, setStockSnapshot] = useState(null);   // live stock from Shopify
+  const [stockResult, setStockResult]   = useState(null);
+  const [stockError, setStockError]     = useState(null);
+  const [stockErrorTech, setStockErrorTech] = useState(null);
 
   // ── Download blank template ───────────────────────────────
   async function handleDownloadTemplate() {
@@ -320,9 +429,11 @@ export default function BulkPPUpdateView({ onClose, user }) {
     setFileErrors([]);
     setParsedRows([]);
     setSkuValidation({});
+    setLocations([]);
+    setStockSnapshot(null);
 
     const text = await file.text();
-    const { rows, fileErrors: ferrs } = parseCSV(text);
+    const { rows, locations: locNames, fileErrors: ferrs } = parseCSV(text);
 
     if (ferrs.length > 0) {
       setFileErrors(ferrs);
@@ -330,6 +441,7 @@ export default function BulkPPUpdateView({ onClose, user }) {
     }
 
     setParsedRows(rows);
+    setLocations(locNames);
 
     // Only validate rows that passed client-side checks AND actually
     // provide a PP — rows with no PP are skipped entirely, no need to
@@ -358,8 +470,31 @@ export default function BulkPPUpdateView({ onClose, user }) {
       }
 
       setSkuValidation(validation);
+
+      // Per-location stock: load live current stock so the preview can show
+      // exactly what will change, and reject unknown location columns early.
+      if (locNames.length > 0) {
+        if (skusToCheck.length > MAX_STOCK_SKUS) {
+          setFileErrors([
+            `This file has ${skusToCheck.length} SKUs. When stock columns are included, please upload at most ${MAX_STOCK_SKUS} SKUs at a time. Split the file and upload it in parts.`,
+          ]);
+          setValidating(false);
+          return;
+        }
+        const snap = await fetchStockSnapshot(skusToCheck);
+        const known = new Set(snap.locations.map(l => l.toLowerCase()));
+        const unknown = locNames.filter(l => !known.has(l.toLowerCase()));
+        if (unknown.length > 0) {
+          setFileErrors([
+            `These column names are not Shopify locations: ${unknown.join(', ')}. Check the spelling or delete the column. Allowed locations: ${snap.locations.join(', ')}.`,
+          ]);
+          setValidating(false);
+          return;
+        }
+        setStockSnapshot(snap);
+      }
     } catch (err) {
-      setFileErrors(['Server validation failed. Check the API server.']);
+      setFileErrors([apiErrorText(err, 'We could not check this file right now. Please try again. If it keeps happening, contact the tech team.')]);
       setValidating(false);
       return;
     }
@@ -387,9 +522,16 @@ export default function BulkPPUpdateView({ onClose, user }) {
       return { ...row, isUnidentified: false, currentPP: null };
     }
 
-    // Found in DB → valid, show % change
+    // Found in DB → valid, show % change (+ per-location stock changes)
     if (v.found) {
-      return { ...row, isUnidentified: false, currentPP: v.currentPP };
+      const { changes, errors: stockErrors } = computeStockChanges(row, locations, stockSnapshot);
+      return {
+        ...row,
+        errors: [...row.errors, ...stockErrors],
+        isUnidentified: false,
+        currentPP: v.currentPP,
+        stockChanges: changes,
+      };
     }
 
     // Not found in DB → unidentified (warning, not blocking)
@@ -411,25 +553,63 @@ export default function BulkPPUpdateView({ onClose, user }) {
     return pct !== null && Math.abs(pct) >= 10;
   }).length;
 
+  // Per-location stock summary (preview only; the server re-checks against live stock on import)
+  const stockChangeRows  = validRows.filter(r => r.stockChanges?.length > 0);
+  const stockChangeCount = stockChangeRows.reduce((n, r) => n + r.stockChanges.length, 0);
+  const zeroingCount     = stockChangeRows.reduce(
+    (n, r) => n + r.stockChanges.filter(c => c.newQty === 0 && c.oldQty > 0).length, 0);
+
   // Import is allowed if there are no hard format errors AND there's at least one row to do something with
   const canImport = hardErrorRows.length === 0 && (validRows.length > 0 || unidentifiedRows.length > 0);
 
   // ── Handle import ─────────────────────────────────────────
+  // 1) PP update (existing endpoint)  2) stock update → Shopify (new endpoint).
+  // The stock step only sends rows the preview found changes for; the server
+  // re-reads live stock, diffs again, pushes only real changes and logs them.
   async function handleImport() {
     if (!canImport) return;
     setImporting(true);
+    setFileErrors([]);
 
+    let ppResult = null;
     try {
-      const payload      = validRows.map(r => ({ skuId: r.sku, newPP: r.pp }));
+      const payload      = validRows.filter(r => r.pp != null).map(r => ({ skuId: r.sku, newPP: r.pp }));
       const unidentified = unidentifiedRows.map(r => ({ sku: r.sku, pp: r.pp ?? null }));
-      const result       = await bulkUpdatePP(payload, unidentified, fileName);
-      setImportResult(result);
-      setStage(STAGE.DONE);
+      if (payload.length > 0 || unidentified.length > 0) {
+        ppResult = await bulkUpdatePP(payload, unidentified, fileName);
+      }
     } catch (err) {
-      setFileErrors([err?.response?.data?.error || err.message || 'Import failed']);
-    } finally {
+      setFileErrors([apiErrorText(err, 'The price update could not be saved, so nothing was changed. Please try again. If it keeps happening, contact the tech team.')]);
       setImporting(false);
+      return;
     }
+
+    let stockRes = null;
+    let stockErr = null;
+    let stockTech = null;
+    const stockRows = validRows
+      .filter(r => r.stockChanges?.length > 0)
+      .map(r => ({ skuId: r.sku, stock: r.stock }));
+    if (stockRows.length > 0) {
+      try {
+        stockRes = await bulkUpdateStock(stockRows, fileName, ppResult?.sessionId ?? null);
+      } catch (err) {
+        stockErr = apiErrorText(err, 'The stock update could not be completed. Please try again. If it keeps happening, contact the tech team.');
+        stockTech = err?.response?.data?.technical || null;
+      }
+    }
+
+    setStockResult(stockRes);
+    setStockError(stockErr);
+    setStockErrorTech(stockTech);
+    setImportResult(ppResult || {
+      updated: 0,
+      unidentifiedCount: 0,
+      updatedBy: stockRes?.updatedBy || user?.email || '',
+      updatedAt: stockRes?.updatedAt || new Date().toISOString(),
+    });
+    setStage(STAGE.DONE);
+    setImporting(false);
   }
 
   // ── Reset to upload stage ─────────────────────────────────
@@ -440,6 +620,11 @@ export default function BulkPPUpdateView({ onClose, user }) {
     setFileErrors([]);
     setSkuValidation({});
     setImportResult(null);
+    setLocations([]);
+    setStockSnapshot(null);
+    setStockResult(null);
+    setStockError(null);
+    setStockErrorTech(null);
   }
 
   return (
@@ -524,9 +709,9 @@ export default function BulkPPUpdateView({ onClose, user }) {
               </h2>
               <ol className="space-y-3">
                 {[
-                  { n: '1', text: 'Download the CSV template below — it has two columns: SKU and PP.' },
-                  { n: '2', text: 'Fill in the SKUs and new purchase prices. Only add products you want to update.' },
-                  { n: '3', text: "Save the file as CSV and upload it here. You'll see a preview before anything is saved." },
+                  { n: '1', text: 'Download the CSV below (or use "Download CSV" on the PP Update page to get products pre-filled with live PP and stock). Columns: SKU, PP, then one column per vendor location.' },
+                  { n: '2', text: 'Enter the new purchase price and the stock count per location. Leave a cell blank if you do not want to change it. Type 0 to set the stock to 0. NA means the location is not active for that SKU (locations are activated in Shopify, not here). Stock counts are pushed to Shopify.' },
+                  { n: '3', text: "Save the file as CSV and upload it here. You'll see a preview of every PP and stock change before anything is saved." },
                 ].map(item => (
                   <li key={item.n} className="flex items-start gap-3">
                     <span className="w-5 h-5 rounded-full bg-violet-900/60 border border-violet-700/60
@@ -547,20 +732,27 @@ export default function BulkPPUpdateView({ onClose, user }) {
               <div className="font-mono text-xs">
                 <div className="flex gap-0">
                   <div className="bg-slate-700/60 text-slate-300 px-4 py-1.5 rounded-tl-md border-b border-slate-600 font-semibold">SKU</div>
-                  <div className="bg-slate-700/60 text-slate-300 px-4 py-1.5 rounded-tr-md border-b border-l border-slate-600 font-semibold">PP</div>
+                  <div className="bg-slate-700/60 text-slate-300 px-4 py-1.5 border-b border-l border-slate-600 font-semibold w-20">PP</div>
+                  <div className="bg-slate-700/60 text-slate-300 px-4 py-1.5 border-b border-l border-slate-600 font-semibold w-24">Delhi</div>
+                  <div className="bg-slate-700/60 text-slate-300 px-4 py-1.5 rounded-tr-md border-b border-l border-slate-600 font-semibold w-24">Mumbai</div>
                 </div>
                 {[
-                  ['AMD-5600X', '6900'],
-                  ['INTEL-12400F', '7200'],
-                  ['CP-9020281-IN', '3500'],
-                ].map(([sku, pp], i) => (
+                  ['AMD-5600X', '6900', '12', '5'],
+                  ['INTEL-12400F', '7200', 'NA', '8'],
+                  ['CP-9020281-IN', '3500', '3', '0'],
+                ].map(([sku, pp, a, b], i) => (
                   <div key={i} className="flex">
                     <div className={`px-4 py-1 text-violet-300 border-b border-slate-700/60 w-36
                       ${i === 2 ? 'rounded-bl-md' : ''}`}>{sku}</div>
-                    <div className={`px-4 py-1 text-emerald-300 border-b border-l border-slate-700/60
-                      ${i === 2 ? 'rounded-br-md' : ''}`}>{pp}</div>
+                    <div className="px-4 py-1 text-emerald-300 border-b border-l border-slate-700/60 w-20">{pp}</div>
+                    <div className="px-4 py-1 text-sky-300 border-b border-l border-slate-700/60 w-24">{a}</div>
+                    <div className={`px-4 py-1 text-sky-300 border-b border-l border-slate-700/60 w-24
+                      ${i === 2 ? 'rounded-br-md' : ''}`}>{b}</div>
                   </div>
                 ))}
+                <p className="text-[10px] text-slate-500 mt-2 font-sans">
+                  Blank = no change · 0 = set stock to 0 · NA = location not active (leave it as NA) · negative = overbooked. The real template has all your locations.
+                </p>
               </div>
             </div>
 
@@ -639,6 +831,18 @@ export default function BulkPPUpdateView({ onClose, user }) {
                     ⚠ {largeChangeCount} large change{largeChangeCount !== 1 ? 's' : ''}
                   </span>
                 )}
+                {locations.length > 0 && (
+                  <span className="text-xs font-medium px-2.5 py-1 rounded-full
+                    bg-sky-900/40 text-sky-300 border border-sky-700/50">
+                    📦 {stockChangeCount} stock change{stockChangeCount !== 1 ? 's' : ''}
+                  </span>
+                )}
+                {zeroingCount > 0 && (
+                  <span className="text-xs font-medium px-2.5 py-1 rounded-full
+                    bg-amber-900/40 text-amber-400 border border-amber-700/50">
+                    ⚠ {zeroingCount} → 0
+                  </span>
+                )}
                 {unidentifiedRows.length > 0 && (
                   <span className="text-xs font-medium px-2.5 py-1 rounded-full
                     bg-amber-900/40 text-amber-400 border border-amber-700/50">
@@ -648,7 +852,7 @@ export default function BulkPPUpdateView({ onClose, user }) {
                 {skippedRows.length > 0 && (
                   <span className="text-xs font-medium px-2.5 py-1 rounded-full
                     bg-slate-800 text-slate-400 border border-slate-700">
-                    — {skippedRows.length} skipped (no PP)
+                    — {skippedRows.length} skipped (nothing to update)
                   </span>
                 )}
                 {hardErrorRows.length > 0 && (
@@ -662,15 +866,21 @@ export default function BulkPPUpdateView({ onClose, user }) {
 
             {/* Hard error notice — blocks import */}
             {hardErrorRows.length > 0 && (
-              <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-red-900/20 border border-red-700/40 mb-3 text-xs text-red-300">
-                <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                <span>
-                  {hardErrorRows.length} row{hardErrorRows.length !== 1 ? 's have' : ' has'} format errors (duplicate SKU, missing SKU, or invalid PP).
-                  Correct the CSV and re-upload to proceed.
-                </span>
+              <div className="px-4 py-3 rounded-xl bg-red-900/20 border border-red-700/40 mb-3 text-sm text-red-200">
+                <p className="font-semibold text-red-300 mb-1">
+                  {hardErrorRows.length} row{hardErrorRows.length !== 1 ? 's need' : ' needs'} fixing before you can import.
+                </p>
+                <p className="text-xs text-red-300/90 mb-2">
+                  Nothing has been saved. Fix the cells below in your file, save it as CSV and upload it again.
+                </p>
+                <ul className="space-y-1 text-xs text-red-200/90 list-disc pl-5">
+                  {hardErrorRows.slice(0, 8).map((r, i) => (
+                    <li key={i}><span className="font-semibold">Row {r.rowNum}{r.sku ? ` (${r.sku})` : ''}:</span> {r.errors[0]}</li>
+                  ))}
+                </ul>
+                {hardErrorRows.length > 8 && (
+                  <p className="text-xs text-red-300/80 mt-1">…and {hardErrorRows.length - 8} more rows. See the Status column in the table below.</p>
+                )}
               </div>
             )}
 
@@ -689,6 +899,19 @@ export default function BulkPPUpdateView({ onClose, user }) {
               </div>
             )}
 
+            {/* Stock notices */}
+            {locations.length > 0 && stockSnapshot && stockSnapshot.source !== 'shopify-live' && hardErrorRows.length === 0 && (
+              <div className="px-4 py-3 rounded-xl bg-amber-900/20 border border-amber-700/40 mb-3 text-xs text-amber-300">
+                Live Shopify stock could not be read{stockSnapshot.liveError ? ` (${stockSnapshot.liveError})` : ''}, so the preview uses the last synced values.
+                Importing stock changes needs a live read and will be rejected until this is fixed.
+              </div>
+            )}
+            {zeroingCount > 0 && hardErrorRows.length === 0 && (
+              <div className="px-4 py-3 rounded-xl bg-amber-900/20 border border-amber-700/40 mb-3 text-xs text-amber-300">
+                {zeroingCount} location stock value{zeroingCount !== 1 ? 's' : ''} will be set to <span className="font-semibold text-white">0</span> because you
+                typed 0. Check the <span className="font-semibold text-white">Stock changes</span> column before confirming.
+              </div>
+            )}
             {/* Large change warning notice */}
             {largeChangeCount > 0 && hardErrorRows.length === 0 && (
               <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-slate-800/60 border border-slate-600/60 mb-3 text-xs text-slate-300">
@@ -713,6 +936,9 @@ export default function BulkPPUpdateView({ onClose, user }) {
                     <th className="px-4 py-3 text-right  text-xs font-semibold text-slate-400 uppercase tracking-wider">Current PP</th>
                     <th className="px-4 py-3 text-right  text-xs font-semibold text-slate-400 uppercase tracking-wider">New PP</th>
                     <th className="px-4 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider">PP Change</th>
+                    {locations.length > 0 && (
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Stock changes</th>
+                    )}
                     <th className="px-4 py-3 text-left   text-xs font-semibold text-slate-400 uppercase tracking-wider">Status</th>
                   </tr>
                 </thead>
@@ -774,6 +1000,27 @@ export default function BulkPPUpdateView({ onClose, user }) {
                             <span className="text-slate-700 text-[10px]">—</span>
                           )}
                         </td>
+
+                        {/* Stock changes */}
+                        {locations.length > 0 && (
+                          <td className="px-4 py-3">
+                            {!hasHardError && !row.isUnidentified && !row.skipped && row.stockChanges?.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {row.stockChanges.map((c, k) => (
+                                  <span key={k} className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                                    c.newQty === 0
+                                      ? 'bg-red-900/30 text-red-300 border-red-700/40'
+                                      : 'bg-sky-900/30 text-sky-300 border-sky-700/40'
+                                  }`}>
+                                    {c.loc} {c.oldQty} → {c.newQty}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-slate-700 text-[10px]">—</span>
+                            )}
+                          </td>
+                        )}
 
                         {/* Status */}
                         <td className="px-4 py-3">
@@ -863,8 +1110,76 @@ export default function BulkPPUpdateView({ onClose, user }) {
 
             <h2 className="text-xl font-bold text-white mb-2">Import Complete</h2>
             <p className="text-slate-400 text-sm mb-8">
-              Purchase prices have been updated successfully.
+              {importResult.updated > 0 && stockResult
+                ? 'Purchase prices and stock have been updated.'
+                : stockResult
+                ? 'Stock has been updated in Shopify.'
+                : 'Purchase prices have been updated successfully.'}
             </p>
+
+            {/* Stock result */}
+            {stockResult && (
+              <div className="mb-6 text-left">
+                <div className="grid grid-cols-3 gap-3 mb-3">
+                  <div className="rounded-xl border border-sky-700/40 bg-sky-900/20 p-4 text-center">
+                    <p className="text-xs text-slate-500 mb-1">Pushed</p>
+                    <p className="text-2xl font-bold text-sky-300">{stockResult.pushed}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">to Shopify</p>
+                  </div>
+                  <div className={`rounded-xl border p-4 text-center ${stockResult.failed > 0
+                    ? 'border-red-700/40 bg-red-900/20' : 'border-slate-700/40 bg-slate-900/20'}`}>
+                    <p className="text-xs text-slate-500 mb-1">Failed</p>
+                    <p className={`text-2xl font-bold ${stockResult.failed > 0 ? 'text-red-400' : 'text-slate-400'}`}>{stockResult.failed}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">cells</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-700/40 bg-slate-900/20 p-4 text-center">
+                    <p className="text-xs text-slate-500 mb-1">Unchanged</p>
+                    <p className="text-2xl font-bold text-slate-400">{stockResult.unchanged}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">cells</p>
+                  </div>
+                </div>
+                {stockResult.failures?.length > 0 && (
+                  <div className="rounded-xl bg-red-900/20 border border-red-700/40 px-4 py-3 text-sm text-red-200">
+                    <p className="font-semibold text-red-300 mb-1">
+                      {stockResult.failures.length} stock change{stockResult.failures.length !== 1 ? 's' : ''} could not be saved in Shopify
+                    </p>
+                    <p className="text-xs text-red-300/90 mb-2">
+                      The other changes were saved. Upload the same file again to retry only these — cells that are already correct are skipped.
+                    </p>
+                    <ul className="space-y-1.5 text-xs">
+                      {stockResult.failures.slice(0, 10).map((f, k) => (
+                        <li key={k}>
+                          <span className="font-semibold">{f.sku} at {f.location}:</span> {f.error}
+                          {f.technical && (
+                            <details className="mt-0.5 text-[11px] text-red-300/70">
+                              <summary className="cursor-pointer">Technical details (for the tech team)</summary>
+                              <p className="font-mono break-all mt-1">{f.technical}</p>
+                            </details>
+                          )}
+                        </li>
+                      ))}
+                      {stockResult.failures.length > 10 && <li>…and {stockResult.failures.length - 10} more.</li>}
+                    </ul>
+                  </div>
+                )}
+                {stockResult.logWarning && (
+                  <p className="mt-2 text-xs text-amber-300">{stockResult.logWarning}</p>
+                )}
+              </div>
+            )}
+            {stockError && (
+              <div className="mb-6 text-left rounded-xl bg-red-900/20 border border-red-700/40 px-4 py-3 text-xs text-red-300">
+                <p className="font-semibold text-sm mb-1">The stock update did not go through</p>
+                <p className="text-sm">{stockError}</p>
+                <p className="mt-1 text-red-400/80">The purchase prices were saved. No stock was changed. Upload the same file again to retry.</p>
+                {stockErrorTech && (
+                  <details className="mt-1 text-[11px] text-red-300/70">
+                    <summary className="cursor-pointer">Technical details (for the tech team)</summary>
+                    <p className="font-mono break-all mt-1">{stockErrorTech}</p>
+                  </details>
+                )}
+              </div>
+            )}
 
             {/* Stats */}
             <div className={`grid gap-3 mb-8 ${importResult.unidentifiedCount > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
@@ -909,6 +1224,7 @@ export default function BulkPPUpdateView({ onClose, user }) {
             )}
 
             {/* Recommendation engine note */}
+            {importResult.updated > 0 && (
             <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-slate-800/60
               border border-slate-700/60 text-xs text-slate-400 text-left mb-8">
               <svg className="w-4 h-4 text-violet-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -919,6 +1235,7 @@ export default function BulkPPUpdateView({ onClose, user }) {
                 PP values are updated. Run the recommendation engine to recalculate RecommendedSP for affected products.
               </span>
             </div>
+            )}
 
             {/* Actions */}
             <div className="flex items-center justify-center gap-3">
@@ -943,4 +1260,3 @@ export default function BulkPPUpdateView({ onClose, user }) {
     </div>
   );
 }
-

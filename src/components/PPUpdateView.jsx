@@ -10,7 +10,7 @@ import SearchBar      from './SearchBar';
 import CategoryFilter from './CategoryFilter';
 import BrandFilter    from './BrandFilter';
 import PPUpdateRow    from './PPUpdateRow';
-import { fetchPPProducts } from '../services/api';
+import { fetchPPProducts, fetchStockSnapshot } from '../services/api';
 
 export default function PPUpdateView({ onClose }) {
   const [data, setData]                 = useState([]);
@@ -21,6 +21,7 @@ export default function PPUpdateView({ onClose }) {
   const [selectedBrand, setSelectedBrand] = useState('');
   const [activeInStockOnly, setActiveInStockOnly] = useState(false);
   const [ppFilter, setPpFilter] = useState('all'); // 'all' | 'available' | 'unavailable'
+  const [downloading, setDownloading] = useState(false);
 
   // ── Load all products on mount ────────────────────────────
   useEffect(() => {
@@ -98,31 +99,59 @@ export default function PPUpdateView({ onClose }) {
   // SKUs are pre-filled from whatever is currently filtered/visible here,
   // and PP is pre-filled when the product already has one — so a sales
   // rep can open the file and only needs to type in the blanks.
-  function handleDownloadFiltered() {
-    const escapeCell = (v) => {
-      const s = String(v ?? '');
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const header = 'SKU,PP\n';
-    const body = filteredData
-      .map(r => `${escapeCell(r.SKU_ID)},${r.PP != null ? r.PP : ''}`)
-      .join('\n');
-    const blob = new Blob([header + body], { type: 'text/csv' });
-    const url  = window.URL.createObjectURL(blob);
+  async function handleDownloadFiltered() {
+    if (downloading || filteredData.length === 0) return;
+    setDownloading(true);
+    try {
+      const escapeCell = (v) => {
+        const s = String(v ?? '');
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
 
-    const parts = ['pp_export'];
-    if (selectedCategory)  parts.push(selectedCategory.replace(/\s+/g, '_').toLowerCase());
-    if (selectedBrand)     parts.push(selectedBrand.replace(/\s+/g, '_').toLowerCase());
-    if (activeInStockOnly) parts.push('active_instock');
-    if (ppFilter !== 'all') parts.push(ppFilter);
+      // Live per-location stock for exactly the SKUs being exported.
+      let snap = null;
+      try {
+        snap = await fetchStockSnapshot(filteredData.map(r => r.SKU_ID));
+      } catch (err) {
+        const msg = err?.response?.data?.error || err.message;
+        const goOn = window.confirm(
+          `Could not load stock per location (${msg}).\n\nDownload SKU and PP only?`
+        );
+        if (!goOn) return;
+      }
 
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${parts.join('_')}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    link.parentNode.removeChild(link);
-    window.URL.revokeObjectURL(url);
+      const locations = snap?.locations || [];
+      const header = ['SKU', 'PP', ...locations].map(escapeCell).join(',');
+      const body = filteredData.map(r => {
+        const levels = snap?.stock?.[String(r.SKU_ID ?? '').trim().toLowerCase()] || {};
+        // NA = location inactive for this SKU; 0 = active but no stock; negative = overbooked
+        const cells = locations.map(loc => (levels[loc] !== undefined ? levels[loc] : 'NA'));
+        return [escapeCell(r.SKU_ID), r.PP != null ? r.PP : '', ...cells].join(',');
+      }).join('\n');
+
+      const blob = new Blob([header + '\n' + body], { type: 'text/csv' });
+      const url  = window.URL.createObjectURL(blob);
+
+      const parts = ['pp_export'];
+      if (selectedCategory)  parts.push(selectedCategory.replace(/\s+/g, '_').toLowerCase());
+      if (selectedBrand)     parts.push(selectedBrand.replace(/\s+/g, '_').toLowerCase());
+      if (activeInStockOnly) parts.push('active_instock');
+      if (ppFilter !== 'all') parts.push(ppFilter);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${parts.join('_')}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      if (snap && snap.source !== 'shopify-live') {
+        window.alert('Shopify could not be reached, so the stock columns use the last synced values (not live).');
+      }
+    } finally {
+      setDownloading(false);
+    }
   }
 
   // ── Stats ─────────────────────────────────────────────────
@@ -307,17 +336,17 @@ export default function PPUpdateView({ onClose }) {
                 </span>
                 <button
                   onClick={handleDownloadFiltered}
-                  disabled={filteredData.length === 0}
+                  disabled={filteredData.length === 0 || downloading}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg
                     bg-emerald-700/80 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed
                     text-white transition-colors"
-                  title="Download the currently filtered products as a bulk-PP-update CSV"
+                  title="Download the currently filtered products with live PP and stock per location"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                       d="M12 10v6m0 0l-3-3m3 3l3-3m-9 7h12a2 2 0 002-2V8a2 2 0 00-2-2h-3.586a1 1 0 01-.707-.293l-1.414-1.414A1 1 0 0010.586 4H6a2 2 0 00-2 2v11a2 2 0 002 2z" />
                   </svg>
-                  Download CSV
+                  {downloading ? 'Preparing…' : 'Download CSV'}
                 </button>
               </div>
             </div>
@@ -752,4 +781,3 @@ export default function PPUpdateView({ onClose }) {
 //     </div>
 //   );
 // }
-

@@ -91,6 +91,27 @@ export async function bulkUpdatePP(rows, unidentified = [], fileName = '') {
   return response.data.data;
 }
 
+// ── Live per-location stock snapshot ──────────────────────────
+// Returns { source: 'shopify-live' | 'view-fallback', locations: string[],
+//           stock: { [skuLowercase]: { [locationName]: qty } } }
+export async function fetchStockSnapshot(skus) {
+  const response = await axios.post(`${BASE_URL}/stock-snapshot`,
+    { skus },
+    { withCredentials: true }
+  );
+  return response.data.data;
+}
+
+// ── Bulk stock update (pushes to Shopify + audit log) ─────────
+// rows: [{ skuId, stock: { "<Location>": "<cell text>" } }]  (blank = 0)
+export async function bulkUpdateStock(rows, fileName = '', ppSessionId = null) {
+  const response = await axios.post(`${BASE_URL}/bulk-update-stock`,
+    { rows, fileName, ppSessionId },
+    { withCredentials: true }
+  );
+  return response.data.data;
+}
+
 // ── Bulk upload history ───────────────────────────────────────
 export async function fetchBulkUploadHistory() {
   const response = await axios.get(`${BASE_URL}/bulk-upload-history`,
