@@ -43,6 +43,7 @@ export default function InsightsTable({
           <th>SKU</th>
           <th>Category</th>
           <th>Detail</th>
+          <th title="When the newest competitor data behind this alert was scraped">Scraped</th>
 
           {showDiff && <th>Diff</th>}
 
