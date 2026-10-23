@@ -3,12 +3,15 @@
 // InsightsView itself stays a thin layout component.
 //
 // Fetching rules
-//  • First visit of the browser session → one full recompute (fresh scrape data).
-//  • After that, every tab / filter / time-range / page combination is fetched at
-//    most ONCE per session. Hopping between tabs re-uses what was already loaded.
-//  • The session store lives in plain module memory: nothing is written to
-//    localStorage / sessionStorage, so a refresh always starts fresh.
-//  • It is wiped whenever data changes through this screen (dismiss, push, reload).
+//  • The SERVER decides when alerts are recomputed from the latest scrape (it
+//    reuses a recompute younger than ~2 min, and recomputes right after every
+//    scrape run). The page just asks; "Refresh" forces one.
+//  • Every tab / filter / time-range / page combination is cached in memory for
+//    CACHE_TTL_MS, so hopping between tabs is instant but never shows data that
+//    is minutes old after a scrape.
+//  • The cache lives in plain module memory: nothing is written to
+//    localStorage / sessionStorage, so a browser refresh always starts fresh.
+//  • It is wiped whenever data changes through this screen (dismiss, push, refresh).
 //  • Typing in the search box is debounced.
 //  • The time range is applied on the SERVER, so a short range means fewer rows
 //    read from SQL and fewer pages — not just hidden rows.
@@ -25,9 +28,11 @@ import {
 
 const PAGE_SIZE = 25;
 const MAX_CACHED_PAGES = 100; // safety cap — each entry is only ~25 rows
+const CACHE_TTL_MS = 60_000;  // a cached page older than this is refetched
 const SEARCH_DEBOUNCE_MS = 300;
 
 // 0 = all time. Flip this to 7 / 30 if you'd rather open on a shorter window.
+// (the time filter is about WHEN THE COMPETITOR DATA WAS SCRAPED)
 export const DEFAULT_DAYS = 0;
 
 export const TIME_RANGES = [
@@ -56,9 +61,8 @@ export function tabToAlertType(tab) {
 // ── Session store (module-level → survives tab hops and leaving/returning to
 //    the page, dies on refresh / tab close) ─────────────────────────────────
 const session = {
-  pages: new Map(),        // key → server response for that tab/filter/page
+  pages: new Map(),        // key → { at, res } for that tab/filter/page
   counts: new Map(),       // days → { all, price, oos, listing, defaultThreshold }
-  needsRecompute: true,    // true until the first full recompute has been requested
 };
 const inflight = new Map(); // key → Promise, so duplicate identical calls share one request
 
@@ -67,7 +71,7 @@ function pageKey(p) {
 }
 
 function rememberPage(key, res) {
-  session.pages.set(key, res);
+  session.pages.set(key, { at: Date.now(), res });
   if (session.pages.size > MAX_CACHED_PAGES) {
     session.pages.delete(session.pages.keys().next().value); // drop the oldest
   }
@@ -92,7 +96,7 @@ export default function useInsightsData() {
   const [category, setCategoryState] = useState("");
   const [brand, setBrandState] = useState("");
   const [days, setDaysState] = useState(DEFAULT_DAYS);
-  const [sortBy, setSortByState] = useState("newest");
+  const [sortBy, setSortByState] = useState("scraped_desc");
   const [page, setPage] = useState(1);
 
   const [rows, setRows] = useState([]);
@@ -109,7 +113,12 @@ export default function useInsightsData() {
 
   // Changing a filter/sort/tab always goes back to page 1 — in the SAME state
   // update, so it costs one fetch, not one for the old page + one for page 1.
-  const setTab = (v) => { setTabState(v); setPage(1); };
+  // "Difference" sorts exist only on the price tab — fall back elsewhere.
+  const setTab = (v) => {
+    setTabState(v);
+    setPage(1);
+    if (v !== "price") setSortByState((cur) => (cur.startsWith("diff") ? "scraped_desc" : cur));
+  };
   const setSearch = (v) => setSearchState(v); // page 1 is applied when the debounced value lands
   const setCategory = (v) => { setCategoryState(v); setPage(1); };
   const setBrand = (v) => { setBrandState(v); setPage(1); };
@@ -137,7 +146,7 @@ export default function useInsightsData() {
 
   // force: skip the session store and read from the server
   // silent: don't flip the table into its "Loading…" state
-  const load = useCallback(async ({ force = false, silent = false } = {}) => {
+  const load = useCallback(async ({ force = false, silent = false, forceRecompute = false } = {}) => {
     const params = {
       alertType: tabToAlertType(tab),
       category: category || null,
@@ -150,10 +159,10 @@ export default function useInsightsData() {
     const key = pageKey(params);
 
     if (!force) {
-      const hit = session.pages.get(key);
-      if (hit) {
+      const entry = session.pages.get(key);
+      if (entry && Date.now() - entry.at < CACHE_TTL_MS) {
         latestRequest.current += 1; // invalidate anything still in flight
-        applyResult(hit);
+        applyResult(entry.res);
         setError(null);
         setLoading(false);
         return;
@@ -164,13 +173,11 @@ export default function useInsightsData() {
     if (!silent) setLoading(true);
     setError(null);
 
-    const recompute = session.needsRecompute;
-    session.needsRecompute = false; // only the very first request of the session recomputes
     let handedOff = false;
 
     try {
       const res = await shared(key, () =>
-        fetchInsights({ ...params, pageSize: PAGE_SIZE, skipRecompute: !recompute })
+        fetchInsights({ ...params, pageSize: PAGE_SIZE, skipRecompute: false, refresh: force && forceRecompute })
       );
       if (myId !== latestRequest.current) return; // a newer request owns the screen now
 
@@ -185,17 +192,16 @@ export default function useInsightsData() {
       rememberPage(key, res);
       applyResult(res);
     } catch (err) {
-      if (recompute) session.needsRecompute = true; // the recompute never landed — try again next time
       if (myId === latestRequest.current) setError("Failed to load alerts.");
     } finally {
       if (myId === latestRequest.current && !handedOff) setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, category, brand, debouncedSearch, days, sortBy, page]);
 
   const refreshCounts = useCallback(async ({ force = false } = {}) => {
-    if (!force && session.counts.has(days)) {
-      setCounts(session.counts.get(days));
+    const cached = session.counts.get(days);
+    if (!force && cached && Date.now() - cached.at < CACHE_TTL_MS) {
+      setCounts(cached.value);
       return;
     }
     try {
@@ -206,7 +212,7 @@ export default function useInsightsData() {
           defaultThreshold: res.defaultThreshold ?? null,
         };
       });
-      session.counts.set(days, fresh);
+      session.counts.set(days, { at: Date.now(), value: fresh });
       setCounts(fresh);
     } catch {
       // counts are supplementary — a failure here shouldn't block the table
@@ -255,11 +261,11 @@ export default function useInsightsData() {
     refreshCounts({ force: true });
   }
 
-  // Full recompute (used after a push, so a resolved alert actually disappears).
-  function reload() {
+  // Forces a recompute from the latest scrape, then reloads this view. Used by
+  // the Refresh button and after a push (so a resolved alert disappears).
+  async function reload() {
     clearSession();
-    session.needsRecompute = true;
-    load({ force: true });
+    await load({ force: true, forceRecompute: true });
     refreshCounts({ force: true });
   }
 
@@ -286,307 +292,3 @@ export default function useInsightsData() {
     exportParams,
   };
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// // src/components/insights/useInsightsData.js
-// // All state + data-fetching for the Insights dashboard lives here, so
-// // InsightsView itself stays a thin layout component.
-// //
-// // Fetching rules
-// //  • First visit of the browser session → one full recompute (fresh scrape data),
-// //    exactly like before.
-// //  • After that, every tab / filter / page combination is fetched at most ONCE per
-// //    session. Hopping Price alerts → Out of stock → Not in catalog → back re-uses
-// //    what was already loaded, with no API call.
-// //  • The session store lives in plain module memory: nothing is written to
-// //    localStorage / sessionStorage, so closing the browser tab OR refreshing the
-// //    page always starts completely fresh.
-// //  • It is wiped whenever data changes through this screen (dismiss, push,
-// //    reload), and the current page is re-read from the server straight away.
-// //  • Typing in the search box is debounced (SEARCH_DEBOUNCE_MS): the input updates
-// //    instantly, but the API is only called once you pause typing.
-
-// import { useCallback, useEffect, useRef, useState } from "react";
-// import { fetchInsights, dismissInsight, bulkDismissInsights } from "../../services/api";
-
-// const PAGE_SIZE = 25;
-// const MAX_CACHED_PAGES = 100; // safety cap — each entry is only ~25 rows
-// const SEARCH_DEBOUNCE_MS = 300;
-
-// function tabToAlertType(tab) {
-//   if (tab === "price") return "PRICE";
-//   if (tab === "oos") return "OOS";
-//   if (tab === "listing") return "NO_LISTING";
-//   return null; // 'all'
-// }
-
-// // ── Session store (module-level → survives tab hops and leaving/returning to
-// //    the page, dies on refresh / tab close) ─────────────────────────────────
-// const session = {
-//   pages: new Map(),      // key → server response for that tab/filter/page
-//   counts: null,          // last known { all, price, oos, listing }
-//   needsRecompute: true,  // true until the first full recompute has been requested
-// };
-// const inflight = new Map(); // key → Promise, so duplicate identical calls share one request
-
-// function pageKey(p) {
-//   return JSON.stringify([p.alertType, p.category, p.brand, p.search, p.sortBy, p.page]);
-// }
-
-// function rememberPage(key, res) {
-//   session.pages.set(key, res);
-//   if (session.pages.size > MAX_CACHED_PAGES) {
-//     session.pages.delete(session.pages.keys().next().value); // drop the oldest
-//   }
-// }
-
-// function clearSession() {
-//   session.pages.clear();
-//   session.counts = null;
-// }
-
-// function shared(key, run) {
-//   if (inflight.has(key)) return inflight.get(key);
-//   const p = run().finally(() => inflight.delete(key));
-//   inflight.set(key, p);
-//   return p;
-// }
-
-// export default function useInsightsData() {
-//   const [tab, setTabState] = useState("price");
-//   const [search, setSearchState] = useState("");               // what the input shows (instant)
-//   const [debouncedSearch, setDebouncedSearch] = useState("");   // what the API is called with (after a pause)
-//   const [category, setCategoryState] = useState("");
-//   const [brand, setBrandState] = useState("");
-//   const [sortBy, setSortByState] = useState("newest");
-//   const [page, setPage] = useState(1);
-
-//   const [rows, setRows] = useState([]);
-//   const [counts, setCounts] = useState(session.counts ?? { all: 0, price: 0, oos: 0, listing: 0 });
-//   const [categories, setCategories] = useState([]);
-//   const [brands, setBrands] = useState([]);
-//   const [total, setTotal] = useState(0);
-//   const [totalPages, setTotalPages] = useState(1);
-//   const [loading, setLoading] = useState(true);
-//   const [error, setError] = useState(null);
-//   const [selectedIds, setSelectedIds] = useState([]);
-
-//   const latestRequest = useRef(0); // ignore responses from requests that were superseded
-
-//   // Changing a filter/sort/tab always goes back to page 1 — done in the SAME
-//   // state update so it costs one fetch, not one for the old page + one for page 1.
-//   const setTab = (v) => { setTabState(v); setPage(1); };
-//   const setSearch = (v) => setSearchState(v); // page 1 is applied when the debounced value lands (below)
-//   const setCategory = (v) => { setCategoryState(v); setPage(1); };
-//   const setBrand = (v) => { setBrandState(v); setPage(1); };
-//   const setSortBy = (v) => { setSortByState(v); setPage(1); };
-
-//   // Wait for a pause in typing before searching; then jump to page 1 in one go.
-//   const appliedSearch = useRef("");
-//   useEffect(() => {
-//     if (search === appliedSearch.current) return;
-//     const t = setTimeout(() => {
-//       appliedSearch.current = search;
-//       setPage(1);
-//       setDebouncedSearch(search);
-//     }, SEARCH_DEBOUNCE_MS);
-//     return () => clearTimeout(t);
-//   }, [search]);
-
-//   function applyResult(res) {
-//     setRows(res.data || []);
-//     setTotal(res.total || 0);
-//     setTotalPages(res.totalPages || 1);
-//     setCategories(res.categories || []);
-//     setBrands(res.brands || []);
-//   }
-
-//   // force: skip the session store and read from the server
-//   // silent: don't flip the table into its "Loading…" state (used to backfill after a single dismiss)
-//   const load = useCallback(async ({ force = false, silent = false } = {}) => {
-//     const params = {
-//       alertType: tabToAlertType(tab),
-//       category: category || null,
-//       brand: brand || null,
-//       search: debouncedSearch || null,
-//       sortBy,
-//       page,
-//     };
-//     const key = pageKey(params);
-
-//     if (!force) {
-//       const hit = session.pages.get(key);
-//       if (hit) {
-//         latestRequest.current += 1; // invalidate anything still in flight
-//         applyResult(hit);
-//         setError(null);
-//         setLoading(false);
-//         return;
-//       }
-//     }
-
-//     const myId = ++latestRequest.current;
-//     if (!silent) setLoading(true);
-//     setError(null);
-
-//     const recompute = session.needsRecompute;
-//     session.needsRecompute = false; // only the very first request of the session recomputes
-//     let handedOff = false;
-
-//     try {
-//       const res = await shared(key, () =>
-//         fetchInsights({ ...params, pageSize: PAGE_SIZE, skipRecompute: !recompute })
-//       );
-//       if (myId !== latestRequest.current) return; // a newer request owns the screen now
-
-//       // We asked for a page that no longer exists (e.g. the whole last page was
-//       // just dismissed) → step back to the new last page instead of showing "empty".
-//       if ((res.data || []).length === 0 && page > 1 && (res.totalPages || 1) < page) {
-//         handedOff = true; // the page change below triggers the next load
-//         setPage(Math.max(1, res.totalPages || 1));
-//         return;
-//       }
-
-//       rememberPage(key, res);
-//       applyResult(res);
-//     } catch (err) {
-//       if (recompute) session.needsRecompute = true; // the recompute never landed — try again next time
-//       if (myId === latestRequest.current) setError("Failed to load alerts.");
-//     } finally {
-//       if (myId === latestRequest.current && !handedOff) setLoading(false);
-//     }
-//     // eslint-disable-next-line react-hooks/exhaustive-deps
-//   }, [tab, category, brand, debouncedSearch, sortBy, page]);
-
-//   const refreshCounts = useCallback(async ({ force = false } = {}) => {
-//     if (!force && session.counts) {
-//       setCounts(session.counts);
-//       return;
-//     }
-//     try {
-//       const fresh = await shared("counts", async () => {
-//         const [all, price, oos, listing] = await Promise.all([
-//           fetchInsights({ pageSize: 1, skipRecompute: true }),
-//           fetchInsights({ alertType: "PRICE", pageSize: 1, skipRecompute: true }),
-//           fetchInsights({ alertType: "OOS", pageSize: 1, skipRecompute: true }),
-//           fetchInsights({ alertType: "NO_LISTING", pageSize: 1, skipRecompute: true }),
-//         ]);
-//         return { all: all.total, price: price.total, oos: oos.total, listing: listing.total };
-//       });
-//       session.counts = fresh;
-//       setCounts(fresh);
-//     } catch {
-//       // counts are supplementary — a failure here shouldn't block the table
-//     }
-//   }, []);
-
-//   // Tab counts: fetched once per session, then re-used.
-//   useEffect(() => {
-//     refreshCounts();
-//   }, [refreshCounts]);
-
-//   // Any tab / filter / sort / page change: served from the session store when
-//   // it has been loaded before, otherwise one request.
-//   useEffect(() => {
-//     load();
-//   }, [load]);
-
-//   // A selection only makes sense for the rows on screen — drop it when the view changes.
-//   useEffect(() => {
-//     setSelectedIds([]);
-//   }, [tab, category, brand, debouncedSearch, sortBy, page]);
-
-//   function toggleSelect(id) {
-//     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-//   }
-
-//   function toggleSelectAll() {
-//     setSelectedIds((prev) => (prev.length === rows.length ? [] : rows.map((r) => r.Id)));
-//   }
-
-//   async function dismiss(id) {
-//     await dismissInsight(id);
-//     setRows((prev) => prev.filter((r) => r.Id !== id)); // instant feedback
-//     setSelectedIds((prev) => prev.filter((x) => x !== id));
-//     clearSession();                                     // totals / page contents just changed
-//     load({ force: true, silent: true });                // backfill the page from the server
-//     refreshCounts({ force: true });
-//   }
-
-//   async function dismissSelected() {
-//     if (selectedIds.length === 0) return;
-//     await bulkDismissInsights(selectedIds);
-//     setSelectedIds([]);
-//     clearSession();
-//     await load({ force: true });                        // pulls the NEXT rows into this page
-//     refreshCounts({ force: true });
-//   }
-
-//   // Full recompute (used after a push, so a resolved alert actually disappears).
-//   function reload() {
-//     clearSession();
-//     session.needsRecompute = true;
-//     load({ force: true });
-//     refreshCounts({ force: true });
-//   }
-
-//   return {
-//     tab, setTab,
-//     search, setSearch,
-//     category, setCategory,
-//     brand, setBrand,
-//     sortBy, setSortBy,
-//     page, setPage,
-//     rows, counts, categories, brands, total, totalPages, loading, error,
-//     selectedIds, toggleSelect, toggleSelectAll, dismiss, dismissSelected,
-//     reload,
-//   };
-// }
