@@ -23,11 +23,17 @@ import {
 
 // ── Store colour accents ──────────────────────────────────────
 const STORE_COLORS = {
-  primeabgb  : { pill: 'bg-violet-900/50 border-violet-700/60 text-violet-300', dot: 'bg-violet-400' },
-  mdcomputers: { pill: 'bg-sky-900/50 border-sky-700/60 text-sky-300',         dot: 'bg-sky-400'    },
-  vedant     : { pill: 'bg-emerald-900/50 border-emerald-700/60 text-emerald-300', dot: 'bg-emerald-400' },
-  vishal     : { pill: 'bg-amber-900/50 border-amber-700/60 text-amber-300',   dot: 'bg-amber-400'  },
-  pcstudio   : { pill: 'bg-rose-900/50 border-rose-700/60 text-rose-300',      dot: 'bg-rose-400'   },
+  primeabgb      : { pill: 'bg-violet-900/50 border-violet-700/60 text-violet-300',   dot: 'bg-violet-400'  },
+  mdcomputers    : { pill: 'bg-sky-900/50 border-sky-700/60 text-sky-300',            dot: 'bg-sky-400'     },
+  vedant         : { pill: 'bg-emerald-900/50 border-emerald-700/60 text-emerald-300', dot: 'bg-emerald-400' },
+  vishal         : { pill: 'bg-amber-900/50 border-amber-700/60 text-amber-300',      dot: 'bg-amber-400'   },
+  pcstudio       : { pill: 'bg-rose-900/50 border-rose-700/60 text-rose-300',         dot: 'bg-rose-400'    },
+  fgtech         : { pill: 'bg-teal-900/50 border-teal-700/60 text-teal-300',         dot: 'bg-teal-400'    },
+  theitdepot     : { pill: 'bg-indigo-900/50 border-indigo-700/60 text-indigo-300',   dot: 'bg-indigo-400'  },
+  computechstore : { pill: 'bg-lime-900/50 border-lime-700/60 text-lime-300',         dot: 'bg-lime-400'    },
+  varietyinfotech: { pill: 'bg-fuchsia-900/50 border-fuchsia-700/60 text-fuchsia-300', dot: 'bg-fuchsia-400' },
+  elitehubs      : { pill: 'bg-cyan-900/50 border-cyan-700/60 text-cyan-300',         dot: 'bg-cyan-400'    },
+  amazon         : { pill: 'bg-orange-900/50 border-orange-700/60 text-orange-300',   dot: 'bg-orange-400'  },
 };
 
 const DEFAULT_STORE_COLOR = {
