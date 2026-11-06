@@ -439,3 +439,21 @@ export async function bulkDismissInsights(ids) {
   const response = await axios.post(`${BASE_URL}/insights/dismiss-bulk`, { ids }, { withCredentials: true });
   return response.data.data;
 }
+
+
+
+export async function fetchSalespersonMapping({ search = '', category = '', brand = '' } = {}) {
+  const params = {};
+  if (search)   params.search   = search;
+  if (category) params.category = category;
+  if (brand)    params.brand    = brand;
+  const response = await axios.get(`${BASE_URL}/salesperson-mapping`,
+    { withCredentials: true, params });
+  return response.data.data;
+}
+
+export async function fetchSalespersonMappingFilters() {
+  const response = await axios.get(`${BASE_URL}/salesperson-mapping/filters`,
+    { withCredentials: true });
+  return response.data.data;
+}

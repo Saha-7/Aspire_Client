@@ -1,16 +1,20 @@
-// SalespersonMappingTab.jsx
+// src/components/SalespersonMappingTab.jsx
+// ─────────────────────────────────────────────────────────────
+// Admin-only, READ-ONLY view: which salesperson covers which
+// Category + Brand. The mapping itself lives upstream in
+// vw_Shopify_Product_SKUs_With_SalesPerson — nothing is edited here.
 //
-// Read-only admin view: which salesperson is assigned to which
-// Category + Brand combination. No add/edit/delete — the mapping itself
-// lives upstream in vw_Shopify_Product_SKUs_With_SalesPerson.
-//
-// Wire in as a 4th tab alongside your existing Settings tabs
-// (Business Variables / Variance Threshold / Bill Lookback), e.g.:
-//   <Tab label="Sales Mapping"><SalespersonMappingTab /></Tab>
-//
-// Assumes Tailwind is already configured (it is, per the rest of the app).
+// Filters: search (name / email) + searchable Category + Brand dropdowns
+// (re-uses the same CategoryFilter / BrandFilter as the rest of the app).
+// ─────────────────────────────────────────────────────────────
 
-import { useState, useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import CategoryFilter from './CategoryFilter';
+import BrandFilter from './BrandFilter';
+import {
+  fetchSalespersonMapping,
+  fetchSalespersonMappingFilters,
+} from '../services/api';
 
 const VISIBLE_CHIPS = 3;
 
@@ -19,38 +23,34 @@ function AssignmentChips({ assignments }) {
 
   if (assignments.length === 0) {
     return (
-      <span className="inline-block rounded-full bg-gray-800 text-gray-500 text-xs px-3 py-1 border border-gray-700">
+      <span className="inline-block px-2.5 py-1 rounded-full text-[11px] bg-slate-800 border border-slate-700 text-slate-500">
         Unassigned
       </span>
     );
   }
 
-  const visible = expanded ? assignments : assignments.slice(0, VISIBLE_CHIPS);
+  const visible   = expanded ? assignments : assignments.slice(0, VISIBLE_CHIPS);
   const remaining = assignments.length - VISIBLE_CHIPS;
 
   return (
-    <div className="flex flex-wrap gap-1.5 items-center">
+    <div className="flex flex-wrap items-center gap-1.5">
       {visible.map((a, i) => (
-        <span
-          key={`${a.category}-${a.brand}-${i}`}
-          className="inline-block rounded-full bg-blue-500/10 text-blue-400 text-xs px-3 py-1 border border-blue-500/30"
-        >
-          {a.category || '—'} <span className="text-blue-500/60">•</span> {a.brand || '—'}
+        <span key={`${a.category}|${a.brand}|${i}`}
+          className="px-2.5 py-1 rounded-full text-[11px] bg-violet-900/40 border border-violet-700/50 text-violet-300">
+          {a.category || '—'}
+          <span className="mx-1 text-violet-500">•</span>
+          {a.brand || '—'}
         </span>
       ))}
       {!expanded && remaining > 0 && (
-        <button
-          onClick={() => setExpanded(true)}
-          className="text-xs text-blue-400 hover:text-blue-300 underline underline-offset-2"
-        >
+        <button onClick={() => setExpanded(true)}
+          className="text-[11px] text-violet-400 hover:text-violet-300 underline underline-offset-2">
           +{remaining} more
         </button>
       )}
       {expanded && assignments.length > VISIBLE_CHIPS && (
-        <button
-          onClick={() => setExpanded(false)}
-          className="text-xs text-gray-500 hover:text-gray-400 underline underline-offset-2"
-        >
+        <button onClick={() => setExpanded(false)}
+          className="text-[11px] text-slate-500 hover:text-slate-300 underline underline-offset-2">
           Show less
         </button>
       )}
@@ -59,129 +59,93 @@ function AssignmentChips({ assignments }) {
 }
 
 export default function SalespersonMappingTab() {
-  const [salespeople, setSalespeople] = useState([]);
+  const [rows, setRows]             = useState([]);
   const [categories, setCategories] = useState([]);
-  const [brands, setBrands] = useState([]);
+  const [brands, setBrands]         = useState([]);
+  const [search, setSearch]         = useState('');
+  const [category, setCategory]     = useState('');
+  const [brand, setBrand]           = useState('');
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState(null);
 
-  const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('');
-  const [brand, setBrand] = useState('');
-
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  // Filter dropdown options — fetched once
+  // Dropdown options — once
   useEffect(() => {
-    fetch('/api/salesperson-mapping/filters')
-      .then((r) => r.json())
-      .then((data) => {
-        setCategories(data.categories || []);
-        setBrands(data.brands || []);
-      })
-      .catch(() => {
-        // non-fatal — dropdowns just stay empty
-      });
+    fetchSalespersonMappingFilters()
+      .then((d) => { setCategories(d.categories || []); setBrands(d.brands || []); })
+      .catch(() => { /* non-fatal: dropdowns stay empty */ });
   }, []);
 
-  // Table data — refetched on filter change, debounced for the search box
+  // Table — refetch on filter change (search is debounced)
   useEffect(() => {
-    const handle = setTimeout(() => {
+    let cancelled = false;
+    const t = setTimeout(async () => {
       setLoading(true);
       setError(null);
-
-      const params = new URLSearchParams();
-      if (search) params.set('search', search);
-      if (category) params.set('category', category);
-      if (brand) params.set('brand', brand);
-
-      fetch(`/api/salesperson-mapping?${params.toString()}`)
-        .then((r) => {
-          if (!r.ok) throw new Error('Request failed');
-          return r.json();
-        })
-        .then((data) => setSalespeople(data.salespeople || []))
-        .catch(() => setError('Could not load salesperson mapping. Try again.'))
-        .finally(() => setLoading(false));
+      try {
+        const data = await fetchSalespersonMapping({ search, category, brand });
+        if (!cancelled) setRows(data);
+      } catch (e) {
+        if (!cancelled) setError(e?.response?.data?.error || 'Could not load salesperson mapping.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }, 300);
-
-    return () => clearTimeout(handle);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [search, category, brand]);
 
   const assignedCount = useMemo(
-    () => salespeople.filter((s) => s.assignments.length > 0).length,
-    [salespeople]
+    () => rows.filter((r) => r.assignments.length > 0).length, [rows]
   );
 
   return (
-    <div className="bg-gray-950 text-gray-200 rounded-lg border border-gray-800 p-6">
-      <div className="flex items-center justify-between mb-1">
-        <h2 className="text-lg font-semibold text-gray-100">Category &amp; Brand Mapping</h2>
-        <span className="text-xs text-gray-500">
-          {salespeople.length} salespeople &middot; {assignedCount} assigned
+    <div className="space-y-5">
+      <div className="flex items-end justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-base font-semibold text-slate-100">Category &amp; Brand → Salesperson</h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Read-only. Assignments are maintained upstream; this shows who covers what.
+          </p>
+        </div>
+        <span className="text-xs text-slate-500">
+          {rows.length} salespeople · {assignedCount} assigned · {rows.length - assignedCount} unassigned
         </span>
       </div>
-      <p className="text-sm text-gray-500 mb-5">
-        Read-only view of which salesperson covers which category and brand.
-      </p>
 
-      {/* Filter bar */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-5">
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3">
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search name or email..."
-          className="flex-1 bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500/60"
+          className="flex-1 min-w-[220px] bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500"
         />
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          className="bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500/60"
-        >
-          <option value="">All categories</option>
-          {categories.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-        <select
-          value={brand}
-          onChange={(e) => setBrand(e.target.value)}
-          className="bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500/60"
-        >
-          <option value="">All brands</option>
-          {brands.map((b) => (
-            <option key={b} value={b}>{b}</option>
-          ))}
-        </select>
+        <CategoryFilter categories={categories} value={category} onChange={setCategory} />
+        <BrandFilter brands={brands} value={brand} onChange={setBrand} />
       </div>
 
       {/* Table */}
-      <div className="border border-gray-800 rounded-md overflow-hidden">
-        <div className="grid grid-cols-[1fr_1fr_2fr] bg-gray-900 text-xs uppercase tracking-wide text-gray-500 px-4 py-2">
-          <span>Salesperson</span>
-          <span>Email</span>
-          <span>Assigned</span>
+      <div className="rounded-xl border border-slate-800 overflow-hidden bg-slate-900/40">
+        <div className="grid grid-cols-[1.2fr_1.4fr_3fr] px-4 py-2.5 bg-slate-900 text-[11px] uppercase tracking-wide text-slate-500">
+          <span>Salesperson</span><span>Email</span><span>Assigned</span>
         </div>
 
         {loading && (
-          <div className="px-4 py-6 text-sm text-gray-500">Loading...</div>
+          <div className="px-4 py-8 text-sm text-slate-500 flex items-center gap-3">
+            <div className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+            Loading...
+          </div>
+        )}
+        {!loading && error && <div className="px-4 py-6 text-sm text-red-400">{error}</div>}
+        {!loading && !error && rows.length === 0 && (
+          <div className="px-4 py-8 text-sm text-slate-500">No salespeople match these filters.</div>
         )}
 
-        {!loading && error && (
-          <div className="px-4 py-6 text-sm text-red-400">{error}</div>
-        )}
-
-        {!loading && !error && salespeople.length === 0 && (
-          <div className="px-4 py-6 text-sm text-gray-500">No salespeople match these filters.</div>
-        )}
-
-        {!loading && !error && salespeople.map((sp) => (
-          <div
-            key={sp.email}
-            className="grid grid-cols-[1fr_1fr_2fr] items-center px-4 py-3 border-t border-gray-800 hover:bg-gray-900/50"
-          >
-            <span className="text-sm text-gray-200">{sp.firstName} {sp.lastName}</span>
-            <span className="text-sm text-gray-500">{sp.email}</span>
+        {!loading && !error && rows.map((sp) => (
+          <div key={sp.email}
+            className="grid grid-cols-[1.2fr_1.4fr_3fr] items-center gap-2 px-4 py-3 border-t border-slate-800 hover:bg-slate-800/40">
+            <span className="text-sm text-slate-200">{sp.firstName} {sp.lastName}</span>
+            <span className="text-xs text-slate-500 truncate">{sp.email}</span>
             <AssignmentChips assignments={sp.assignments} />
           </div>
         ))}
