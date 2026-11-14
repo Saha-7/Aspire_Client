@@ -21,6 +21,7 @@ import ScrapeStatsView from "./components/ScrapeStatsView";
 import { PushLockProvider } from "./context/PushLockContext";
 import Header, { VIEW } from "./components/Header";
 import InsightsView from "./components/insights/InsightsView";
+import AuditView from "./components/audit/AuditView";
 //import RunScraperButton from "./components/RunScraperButton";
 
 export default function App() {
@@ -303,6 +304,10 @@ function AppInner() {
 
       {view === VIEW.SCRAPE_STATS && (
         <ScrapeStatsView onClose={() => navigate(VIEW.HOME)} user={user} />
+      )}
+
+      {view === VIEW.AUDIT && (
+        <AuditView onClose={() => navigate(VIEW.HOME)} user={user} />
       )}
 
       {/* ── Dashboard (Home) ── */}
