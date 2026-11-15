@@ -1,22 +1,62 @@
 // src/components/SearchBar.jsx
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+
+// Auto-search fires this long after the user stops typing.
+const DEBOUNCE_MS = 800;
+// Don't auto-search for 1 character (too broad). Enter / icon still search any length.
+const MIN_CHARS = 2;
 
 export default function SearchBar({ onSearch, value }) {
   const [inputVal, setInputVal] = useState(value || '');
+  const timerRef = useRef(null);
+  const lastSentRef = useRef((value || '').trim());
+  const onSearchRef = useRef(onSearch);
+
+  useEffect(() => {
+    onSearchRef.current = onSearch;
+  }, [onSearch]);
+
+  // Clear any pending timer on unmount
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  // If the parent changes the value (e.g. "Clear filters"), mirror it here.
+  // Our own submits set lastSentRef first, so they are skipped.
+  useEffect(() => {
+    const v = (value || '').trim();
+    if (v === lastSentRef.current) return;
+    clearTimeout(timerRef.current);
+    lastSentRef.current = v;
+    setInputVal(value || '');
+  }, [value]);
+
+  function submit(term) {
+    clearTimeout(timerRef.current);
+    if (term === lastSentRef.current) return; // nothing new to search
+    lastSentRef.current = term;
+    onSearchRef.current(term);
+  }
 
   function handleKeyDown(e) {
-    if (e.key === 'Enter') onSearch(inputVal.trim());
+    if (e.key === 'Enter') submit(inputVal.trim());
   }
 
   function handleClick() {
-    onSearch(inputVal.trim());
+    submit(inputVal.trim());
   }
 
   function handleChange(e) {
     const val = e.target.value;
     setInputVal(val);
-    // Clear search instantly when input is emptied
-    if (val === '') onSearch('');
+    clearTimeout(timerRef.current);
+
+    const term = val.trim();
+    if (term === '') {
+      submit(''); // clear instantly when emptied
+      return;
+    }
+    if (term.length >= MIN_CHARS) {
+      timerRef.current = setTimeout(() => submit(term), DEBOUNCE_MS);
+    }
   }
 
   return (
@@ -40,7 +80,7 @@ export default function SearchBar({ onSearch, value }) {
         {/* Clear button */}
         {inputVal && (
           <button
-            onClick={() => { setInputVal(''); onSearch(''); }}
+            onClick={() => { setInputVal(''); submit(''); }}
             className="absolute right-7 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
