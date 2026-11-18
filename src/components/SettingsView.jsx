@@ -1,7 +1,8 @@
 // src/components/SettingsView.jsx
 // ─────────────────────────────────────────────────────────────
 // Full-page Settings panel with four tabs (the last one is admin-only):
-//   1. Business Variables — GST, CostOfBusiness, ProfitMargin per category
+//   1. Business Variables — GST, CostOfBusiness, ProfitMargin per category,
+//                          overridable per brand (see BusinessVariablesTab.jsx)
 //   2. Scraping Config    — ScrapFreqDays, IsScrapEnabled per category
 //                          + Global scrape activity banner (everyone)
 //                          + Run Scraper button (admin/supervisor only)
@@ -16,6 +17,8 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import CategoryMappingTab from './CategoryMappingTab';
 import SalespersonMappingTab from './SalespersonMappingTab';
+import BusinessVariablesTab from './BusinessVariablesTab';
+import { useToast } from '../context/ToastContext';
 import {
   fetchCategorySettings,
   updateCategorySettings,
@@ -583,161 +586,6 @@ function ScraperControl({ user, settingsData = [] }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Business Variables Row (unchanged)
-// ─────────────────────────────────────────────────────────────
-function BusinessRow({ row, onSaved }) {
-  const [editing, setEditing]   = useState(false);
-  const [fields, setFields]     = useState({});
-  const [status, setStatus]     = useState(STATUS.IDLE);
-  const [errMsg, setErrMsg]     = useState('');
-
-  function handleEdit() {
-    setFields({
-      GST           : row.GST            ?? '',
-      CostOfBusiness: row.CostOfBusiness ?? '',
-      ProfitMargin  : row.ProfitMargin   ?? '',
-      PPLookbackDays: row.PPLookbackDays ?? '',
-    });
-    setEditing(true);
-    setStatus(STATUS.IDLE);
-    setErrMsg('');
-  }
-
-  function handleCancel() {
-    setEditing(false);
-    setStatus(STATUS.IDLE);
-  }
-
-  function validateField(name, val) {
-    if (val === '' || val === null) return null;
-    const n = parseFloat(val);
-    if (name === 'PPLookbackDays') {
-      if (isNaN(n) || n < 1 || n > 365) return 'PP Lookback must be 1–365 days';
-      return null;
-    }
-    if (isNaN(n) || n < 0 || n > 100) return `${name} must be 0–100`;
-    return null;
-  }
-
-  async function handleSave() {
-    for (const [key, val] of Object.entries(fields)) {
-      const err = validateField(key, val);
-      if (err) { setErrMsg(err); return; }
-    }
-
-    setStatus(STATUS.SAVING);
-    setErrMsg('');
-
-    try {
-      const payload = {
-        GST           : fields.GST            === '' ? null : parseFloat(fields.GST),
-        CostOfBusiness: fields.CostOfBusiness === '' ? null : parseFloat(fields.CostOfBusiness),
-        ProfitMargin  : fields.ProfitMargin   === '' ? null : parseFloat(fields.ProfitMargin),
-        PPLookbackDays: fields.PPLookbackDays === '' ? null : parseInt(fields.PPLookbackDays, 10),
-        ScrapFreqDays : row.ScrapFreqDays,
-        IsScrapEnabled: row.IsScrapEnabled,
-      };
-
-      const updated = await updateCategorySettings(row.CategoryName, payload);
-      setEditing(false);
-      setStatus(STATUS.SAVED);
-      onSaved(updated);
-      setTimeout(() => setStatus(STATUS.IDLE), 3000);
-    } catch (err) {
-      setStatus(STATUS.ERROR);
-      setErrMsg(err?.response?.data?.error || err.message || 'Save failed');
-    }
-  }
-
-  // Multiplier is still computed (used for the tooltip below and by the
-  // recommendation engine server-side) — just no longer shown as its own
-  // table column per product decision; PP Lookback takes that slot instead.
-  const gstVal  = fields.GST            !== '' ? parseFloat(fields.GST  || 0)            : (row.GST            ?? SYSTEM_DEFAULTS.GST);
-  const cobVal  = fields.CostOfBusiness !== '' ? parseFloat(fields.CostOfBusiness  || 0) : (row.CostOfBusiness ?? SYSTEM_DEFAULTS.CostOfBusiness);
-  const mgnVal  = fields.ProfitMargin   !== '' ? parseFloat(fields.ProfitMargin    || 0) : (row.ProfitMargin   ?? SYSTEM_DEFAULTS.ProfitMargin);
-  const multiplier = editing
-    ? (1 + (isNaN(gstVal) ? 0 : gstVal) / 100 + (isNaN(cobVal) ? 0 : cobVal) / 100 + (isNaN(mgnVal) ? 0 : mgnVal) / 100).toFixed(4)
-    : (1 + (row.GST ?? SYSTEM_DEFAULTS.GST) / 100 + (row.CostOfBusiness ?? SYSTEM_DEFAULTS.CostOfBusiness) / 100 + (row.ProfitMargin ?? SYSTEM_DEFAULTS.ProfitMargin) / 100).toFixed(4);
-
-  return (
-    <tr className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
-      <td className="px-4 py-3 text-left">
-        <span className="font-medium text-slate-200 text-sm" title={`Multiplier: ×${multiplier}`}>
-          {row.CategoryName}
-        </span>
-      </td>
-      <td className="px-4 py-3 text-center">
-        {editing ? (
-          <PercentInput value={fields.GST} onChange={v => setFields(f => ({ ...f, GST: v }))} placeholder={`${SYSTEM_DEFAULTS.GST} (default)`} />
-        ) : (
-          <ValueOrDefault value={row.GST} defaultVal={SYSTEM_DEFAULTS.GST} />
-        )}
-      </td>
-      <td className="px-4 py-3 text-center">
-        {editing ? (
-          <PercentInput value={fields.CostOfBusiness} onChange={v => setFields(f => ({ ...f, CostOfBusiness: v }))} placeholder={`${SYSTEM_DEFAULTS.CostOfBusiness} (default)`} />
-        ) : (
-          <ValueOrDefault value={row.CostOfBusiness} defaultVal={SYSTEM_DEFAULTS.CostOfBusiness} />
-        )}
-      </td>
-      <td className="px-4 py-3 text-center">
-        {editing ? (
-          <PercentInput value={fields.ProfitMargin} onChange={v => setFields(f => ({ ...f, ProfitMargin: v }))} placeholder={`${SYSTEM_DEFAULTS.ProfitMargin} (default)`} />
-        ) : (
-          <ValueOrDefault value={row.ProfitMargin} defaultVal={SYSTEM_DEFAULTS.ProfitMargin} />
-        )}
-      </td>
-      <td className="px-4 py-3 text-center">
-        {editing ? (
-          <DaysInput value={fields.PPLookbackDays} onChange={v => setFields(f => ({ ...f, PPLookbackDays: v }))} placeholder={`${SYSTEM_DEFAULTS.PPLookbackDays} (default)`} />
-        ) : (
-          <ValueOrDefault value={row.PPLookbackDays} defaultVal={SYSTEM_DEFAULTS.PPLookbackDays} suffix=" days" decimals={0} />
-        )}
-      </td>
-      <td className="px-4 py-3 text-center">
-        {row.UpdatedBy ? (
-          <div className="flex flex-col items-center gap-0.5">
-            <span className="text-slate-300 text-[11px]">{row.UpdatedBy}</span>
-            <span className="text-slate-600 text-[10px]">{fmtDate(row.UpdatedAt)}</span>
-          </div>
-        ) : (
-          <span className="text-slate-600 text-xs">—</span>
-        )}
-      </td>
-      <td className="px-4 py-3 text-center">
-        {editing ? (
-          <div className="flex flex-col items-center gap-1.5">
-            {errMsg && <span className="text-[10px] text-red-400 max-w-[120px] text-center">{errMsg}</span>}
-            <div className="flex items-center gap-1.5">
-              <button onClick={handleSave} disabled={status === STATUS.SAVING}
-                className="px-2.5 py-1 text-[10px] font-medium rounded bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white transition-colors">
-                {status === STATUS.SAVING ? 'Saving…' : 'Save'}
-              </button>
-              <button onClick={handleCancel} disabled={status === STATUS.SAVING}
-                className="px-2.5 py-1 text-[10px] font-medium rounded bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors">
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center gap-1">
-            <button onClick={handleEdit}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-              Edit
-            </button>
-            {status === STATUS.SAVED && <span className="text-[10px] text-emerald-400">✓ Saved</span>}
-          </div>
-        )}
-      </td>
-    </tr>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
 // Scraping Config Row (unchanged)
 // ─────────────────────────────────────────────────────────────
 function ScrapingRow({ row, onSaved }) {
@@ -878,120 +726,118 @@ function ScrapingRow({ row, onSaved }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Small shared components (unchanged)
-// ─────────────────────────────────────────────────────────────
-function PercentInput({ value, onChange, placeholder }) {
-  return (
-    <div className="flex items-center justify-center gap-0.5">
-      <input type="number" min="0" max="100" step="0.1" value={value}
-        onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="w-20 px-2 py-1 text-xs text-slate-100 bg-slate-700 border border-slate-600
-          rounded-lg outline-none text-center focus:border-violet-500 placeholder:text-slate-600
-          [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-      <span className="text-slate-500 text-xs">%</span>
-    </div>
-  );
-}
-
-// Same shape as PercentInput but for whole-day windows (1–365, integer steps).
-function DaysInput({ value, onChange, placeholder }) {
-  return (
-    <div className="flex items-center justify-center gap-0.5">
-      <input type="number" min="1" max="365" step="1" value={value}
-        onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="w-20 px-2 py-1 text-xs text-slate-100 bg-slate-700 border border-slate-600
-          rounded-lg outline-none text-center focus:border-violet-500 placeholder:text-slate-600
-          [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-      <span className="text-slate-500 text-xs">days</span>
-    </div>
-  );
-}
-
-function ValueOrDefault({ value, defaultVal, suffix = '%', decimals = 1 }) {
-  if (value != null) {
-    return (
-      <span className="text-slate-200 text-sm font-medium">
-        {parseFloat(value).toFixed(decimals)}
-        <span className="text-slate-500 text-xs ml-0.5">{suffix}</span>
-      </span>
-    );
-  }
-  return (
-    <span className="text-slate-500 text-xs italic">
-      {defaultVal}{suffix} <span className="text-slate-600">(default)</span>
-    </span>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
 // Variance Threshold control — editable global setting used by
 // /api/push-to-shopify to decide when to show the confirm modal.
 // Stored in AppSettings as a decimal (0.20), shown/edited here as
 // a whole percentage (20).
 // ─────────────────────────────────────────────────────────────
 function VarianceThresholdControl() {
-  const [input, setInput]   = useState('');
-  const [status, setStatus] = useState('idle'); // idle | loading | saving | saved | error
-  const [meta, setMeta]     = useState(null);
+  const { showToast } = useToast();
+  const [input, setInput]     = useState('');
+  const [saved, setSaved]     = useState('');      // last saved value, to know if the input changed
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving]   = useState(false);
+  const [invalid, setInvalid] = useState(false);
+  const [meta, setMeta]       = useState(null);
 
   useEffect(() => {
     fetchAppSetting('VARIANCE_THRESHOLD')
       .then(data => {
         const num = parseFloat(data.SettingValue);
-        setInput(isNaN(num) ? '' : (num * 100).toFixed(0));
+        const v = isNaN(num) ? '' : (num * 100).toFixed(0);
+        setInput(v);
+        setSaved(v);
         setMeta(data);
-        setStatus('idle');
       })
-      .catch(() => setStatus('error'));
-  }, []);
+      .catch(() => showToast({
+        type: 'error',
+        title: 'Could not load price variance alert',
+        message: 'Check the API server and refresh the page.',
+      }))
+      .finally(() => setLoading(false));
+  }, [showToast]);
 
   async function handleSave() {
     const pct = parseFloat(input);
     if (isNaN(pct) || pct <= 0 || pct > 100) {
-      setStatus('error');
+      setInvalid(true);
+      showToast({ type: 'error', title: 'Invalid threshold', message: 'Enter a value between 1 and 100.' });
       return;
     }
-    setStatus('saving');
+    setInvalid(false);
+    setSaving(true);
     try {
       const data = await updateAppSetting('VARIANCE_THRESHOLD', (pct / 100).toFixed(4));
       setMeta(data);
-      setStatus('saved');
-      setTimeout(() => setStatus('idle'), 2000);
-    } catch {
-      setStatus('error');
+      setSaved(String(input));
+      showToast({ type: 'success', title: 'Saved successfully', message: `Price variance alert threshold set to ${pct}%.` });
+    } catch (err) {
+      showToast({
+        type: 'error',
+        title: 'Could not save threshold',
+        message: err?.response?.data?.error || err.message || 'Something went wrong. Please try again.',
+      });
+    } finally {
+      setSaving(false);
     }
   }
 
+  const dirty = input !== saved;
+
   return (
-    <div className="flex items-center gap-4 px-4 py-2.5 rounded-xl bg-amber-900/20
-      border border-amber-700/40 mb-5 text-xs flex-wrap">
-      <span className="text-slate-500 font-medium">Price Variance Alert</span>
-      <div className="flex items-center gap-1.5">
-        <input
-          type="number"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          className="w-16 px-2 py-1 text-xs text-slate-100 bg-slate-700 border border-slate-600
-            rounded-lg outline-none text-center focus:border-amber-500
-            [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-        />
-        <span className="text-slate-400">%</span>
+    <section className="mb-6 flex flex-col gap-4 rounded-xl border border-slate-800 bg-slate-900/60 px-5 py-4
+      md:flex-row md:items-center md:justify-between">
+      <div className="flex min-w-0 items-start gap-3.5">
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-violet-500/10
+          text-violet-400 ring-1 ring-inset ring-violet-500/20">
+          <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.7}>
+            <path strokeLinecap="round" strokeLinejoin="round"
+              d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+          </svg>
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-slate-100">Price variance alert</h2>
+          <p className="mt-0.5 text-xs leading-relaxed text-slate-400">
+            Ask for confirmation before pushing a price to Shopify when the variance exceeds this threshold.
+          </p>
+          {meta?.UpdatedBy && (
+            <p className="mt-1.5 text-[11px] text-slate-500">
+              Last updated by <span className="text-slate-400">{meta.UpdatedBy}</span> · {fmtDate(meta.UpdatedAt)}
+            </p>
+          )}
+        </div>
       </div>
-      <button
-        onClick={handleSave}
-        disabled={status === 'saving'}
-        className="px-3 py-1 text-[11px] font-medium rounded-lg bg-amber-600 hover:bg-amber-500
-          disabled:opacity-50 text-white transition-colors">
-        {status === 'saving' ? 'Saving…' : 'Save'}
-      </button>
-      {status === 'saved' && <span className="text-emerald-400">✓ Saved</span>}
-      {status === 'error' && <span className="text-red-400">Invalid value or save failed</span>}
-      {meta?.UpdatedBy && (
-        <span className="text-slate-600 ml-auto">
-          Last updated by {meta.UpdatedBy} on {fmtDate(meta.UpdatedAt)}
-        </span>
-      )}
-    </div>
+
+      <div className="flex flex-shrink-0 items-center gap-3">
+        <label htmlFor="variance-threshold" className="sr-only">Variance threshold in percent</label>
+        <div className="relative">
+          <input
+            id="variance-threshold"
+            type="number"
+            min="1"
+            max="100"
+            value={input}
+            disabled={loading}
+            onChange={e => { setInput(e.target.value); setInvalid(false); }}
+            onKeyDown={e => { if (e.key === 'Enter' && dirty && !saving) handleSave(); }}
+            className={`w-24 rounded-lg border bg-slate-800 py-1.5 pl-3 pr-8 text-sm text-slate-100 outline-none transition-colors
+              disabled:opacity-50 focus:ring-2
+              [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none
+              ${invalid
+                ? 'border-red-500/70 focus:border-red-500 focus:ring-red-500/20'
+                : 'border-slate-700 focus:border-violet-500 focus:ring-violet-500/20'}`}
+          />
+          <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">%</span>
+        </div>
+        <button
+          onClick={handleSave}
+          disabled={saving || loading || !dirty}
+          className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-medium text-white transition-colors
+            hover:bg-violet-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500">
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -1028,6 +874,10 @@ export default function SettingsView({ onClose, user }) {
   // Is current user admin or supervisor?
   const canRunScraper = user?.role === 'admin' || user?.role === 'supervisor';
 
+  // Admin/supervisor see every tab. Salespeople see Business Variables (limited by
+  // the server to their assigned brands) and Category Mapping (full access).
+  const canManage = canRunScraper;
+
   // Salesperson Mapping tab is admin-only (the API route is also admin-only)
   const isAdmin = user?.role === 'admin';
 
@@ -1057,7 +907,7 @@ export default function SettingsView({ onClose, user }) {
               </div>
               <div>
                 <h1 className="text-base font-bold text-white tracking-tight">Settings</h1>
-                <p className="text-xs text-slate-500">Category-level configuration</p>
+                <p className="text-xs text-slate-500">Category and brand configuration</p>
               </div>
             </div>
           </div>
@@ -1117,7 +967,7 @@ export default function SettingsView({ onClose, user }) {
                   </svg>
                 ),
               }] : []),
-            ].map(tab => (
+            ].filter(tab => canManage || tab.key === TABS.BUSINESS || tab.key === TABS.MAPPING).map(tab => (
               <button key={tab.key} onClick={() => setActiveTab(tab.key)}
                 className={`flex items-center gap-2 px-4 py-3 text-xs font-medium border-b-2 transition-colors
                   ${activeTab === tab.key
@@ -1148,39 +998,18 @@ export default function SettingsView({ onClose, user }) {
         {/* ── Business Variables Tab ── */}
         {!loading && !error && activeTab === TABS.BUSINESS && (
           <>
-            <VarianceThresholdControl />
+            {canManage && <VarianceThresholdControl />}
 
-            <div className="flex items-center gap-6 px-4 py-2.5 rounded-xl bg-violet-900/20
-              border border-violet-700/40 mb-5 text-xs flex-wrap">
-              <span className="text-slate-500 font-medium">System defaults:</span>
-              <span className="text-violet-300">GST: {SYSTEM_DEFAULTS.GST}%</span>
-              <span className="text-violet-300">Cost of Business: {SYSTEM_DEFAULTS.CostOfBusiness}%</span>
-              <span className="text-violet-300">Profit Margin: {SYSTEM_DEFAULTS.ProfitMargin}%</span>
-              <span className="text-violet-300">Multiplier: ×{(1 + SYSTEM_DEFAULTS.GST / 100 + SYSTEM_DEFAULTS.CostOfBusiness / 100 + SYSTEM_DEFAULTS.ProfitMargin / 100).toFixed(4)}</span>
-              <span className="text-violet-300">PP Lookback: {SYSTEM_DEFAULTS.PPLookbackDays} days</span>
-            </div>
-
-            <div className="rounded-xl border border-slate-700/60 shadow-2xl overflow-hidden">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="bg-slate-800/80 border-b border-slate-700">
-                    {['Category', 'GST (%)', 'Cost of Business (%)', 'Profit Margin (%)', 'PP Lookback (days)', 'Last Updated By', 'Action'].map(h => (
-                      <th key={h} className="px-4 py-3 text-xs font-semibold text-slate-400 uppercase tracking-wider first:text-left text-center">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.map(row => (
-                    <BusinessRow key={row.CategoryName} row={row} onSaved={handleRowSaved} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <BusinessVariablesTab
+              categorySettings={data}
+              onCategorySettingsSaved={handleRowSaved}
+              ppLookbackDefault={SYSTEM_DEFAULTS.PPLookbackDays}
+            />
           </>
         )}
 
         {/* ── Scraping Config Tab ── */}
-        {!loading && !error && activeTab === TABS.SCRAPING && (
+        {!loading && !error && canManage && activeTab === TABS.SCRAPING && (
           <>
             {/* Global scraping activity — visible to everyone */}
             <GlobalScrapeActivityBanner />
@@ -1226,7 +1055,7 @@ export default function SettingsView({ onClose, user }) {
 
         {/* ── Category Mapping Tab ── */}
         <div style={{ display: activeTab === TABS.MAPPING ? 'block' : 'none' }}>
-          <CategoryMappingTab user={user} categorySettings={data} />
+          <CategoryMappingTab active={activeTab === TABS.MAPPING} />
         </div>
 
         {/* ── Salesperson Mapping Tab (admin only, read-only) ── */}

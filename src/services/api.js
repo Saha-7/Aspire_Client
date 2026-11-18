@@ -30,7 +30,16 @@ export async function checkAuth() {
   }
 }
 
+// Session flag for the one-time "business variables" info toast.
+// Cleared on logout so it shows again after the next sign-in.
+export const BV_INFO_TOAST_KEY = 'aspire.businessVariables.infoSeen';
+export const CM_INFO_TOAST_KEY = 'aspire.categoryMapping.infoSeen';
+
 export async function logout() {
+  try {
+    sessionStorage.removeItem(BV_INFO_TOAST_KEY);
+    sessionStorage.removeItem(CM_INFO_TOAST_KEY);
+  } catch { /* storage unavailable */ }
   await axios.post(`${AUTH_URL}/logout`, {},
     { withCredentials: true });
 }
@@ -162,6 +171,24 @@ export async function updateCategorySettings(categoryName, payload) {
   return response.data.data;
 }
 
+// ── Business variables (category + brand) ─────────────────────
+export async function fetchBusinessVariables() {
+  const response = await axios.get(`${BASE_URL}/business-variables`,
+    { withCredentials: true }
+  );
+  return response.data.data;
+}
+
+// payload: { categoryName, brandName: '' | 'Dell', changes: [{ varKey, value, version }] }
+export async function saveBusinessVariables(payload) {
+  const response = await axios.put(
+    `${BASE_URL}/business-variables`,
+    payload,
+    { withCredentials: true }
+  );
+  return response.data.data;
+}
+
 // ── User management (admin only) ──────────────────────────────
 export async function fetchUsers() {
   const response = await axios.get(`${BASE_URL}/users`, { withCredentials: true });
@@ -250,6 +277,13 @@ export async function getScraperJobLogs(jobId, from = 0) {
 
 export async function fetchStoreCategories() {
   const response = await axios.get(`${BASE_URL}/store-categories`, {
+    withCredentials: true,
+  });
+  return response.data.data;
+}
+
+export async function fetchInternalCategories() {
+  const response = await axios.get(`${BASE_URL}/internal-categories`, {
     withCredentials: true,
   });
   return response.data.data;

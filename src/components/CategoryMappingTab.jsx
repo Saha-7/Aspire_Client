@@ -13,13 +13,24 @@
 // Admin/Supervisor only — enforced on the backend.
 // ─────────────────────────────────────────────────────────────
 
-import { useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import {
   fetchStoreCategories,
   fetchCategoryMappings,
+  fetchInternalCategories,
   saveCategoryMapping,
   deleteCategoryMapping,
+  CM_INFO_TOAST_KEY,
 } from '../services/api';
+import { useToast } from '../context/ToastContext';
+
+const INFO_TEXT =
+  'Click a store category on the left to select it, then click an internal category on the right to link them. ' +
+  'The scraper will use these mappings to know which store pages to scrape for each of your products. ' +
+  'Press Esc to cancel a selection.';
+
+// Timed toasts on this tab stay on screen for 2 seconds. The info toast is sticky (duration 0).
+const TOAST_MS = 2000;
 
 // ── Store colour accents ──────────────────────────────────────
 const STORE_COLORS = {
@@ -85,14 +96,12 @@ function MappingBadge({ mapping, onDelete, deleting }) {
 // ─────────────────────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────────────────────
-export default function CategoryMappingTab({ user, categorySettings = [] }) {
+export default function CategoryMappingTab({ active = true }) {
+  const { showToast, dismissToast } = useToast();
+  const infoToastId = useRef(null);
   // ── Data ──────────────────────────────────────────────────
   const [storeCategories,   setStoreCategories]   = useState([]);
- // const [internalCategories, setInternalCategories] = useState([]);
- const internalCategories = useMemo(
-  () => [...new Set(categorySettings.map(s => s.CategoryName))].sort((a, b) => a.localeCompare(b)),
-  [categorySettings]
-);
+  const [internalCategories, setInternalCategories] = useState([]);
   const [mappings,          setMappings]           = useState([]);
   const [loading,           setLoading]            = useState(true);
   const [error,             setError]              = useState(null);
@@ -124,16 +133,45 @@ export default function CategoryMappingTab({ user, categorySettings = [] }) {
     return () => window.removeEventListener('keydown', handleKey);
   }, []);
 
+  // ── Info toast: sticky (needs dismissing), shown once per sign-in,
+  //    only while this tab is the visible one. "How it works" re-opens it.
+  const showInfo = useCallback(() => {
+    if (infoToastId.current) dismissToast(infoToastId.current);
+    infoToastId.current = showToast({
+      type: 'info',
+      title: 'How category mapping works',
+      message: INFO_TEXT,
+      duration: 0,
+    });
+  }, [showToast, dismissToast]);
+
+  useEffect(() => {
+    if (!active) {
+      if (infoToastId.current) { dismissToast(infoToastId.current); infoToastId.current = null; }
+      return;
+    }
+    if (loading || error) return;
+    try {
+      if (sessionStorage.getItem(CM_INFO_TOAST_KEY)) return;
+      sessionStorage.setItem(CM_INFO_TOAST_KEY, '1');
+    } catch {
+      return; // storage unavailable: skip the one-time toast
+    }
+    showInfo();
+  }, [active, loading, error, showInfo, dismissToast]);
+
   async function load() {
   setLoading(true);
   setError(null);
   try {
-    const [storeCats, maps] = await Promise.all([
+    const [storeCats, maps, cats] = await Promise.all([
       fetchStoreCategories(),
       fetchCategoryMappings(),
+      fetchInternalCategories(),
     ]);
     setStoreCategories(storeCats);
     setMappings(maps);
+    setInternalCategories([...new Set(cats)].sort((x, y) => x.localeCompare(y)));
   } catch (err) {
     setError('Failed to load data. Check the API server.');
   } finally {
@@ -202,11 +240,16 @@ export default function CategoryMappingTab({ user, categorySettings = [] }) {
            m.StoreSlug === selected.storeSlug &&
            m.InternalCategory === categoryName
     );
-    if (alreadyMapped) return;
+    if (alreadyMapped) {
+      showToast({ type: 'warning', title: 'Already mapped',
+        message: `${selected.storeSlug} is already linked to ${categoryName}.`, duration: TOAST_MS });
+      return;
+    }
 
+    const { storeName, storeSlug } = selected;
     setSaving(categoryName);
     try {
-      const saved = await saveCategoryMapping(categoryName, selected.storeName, selected.storeSlug);
+      const saved = await saveCategoryMapping(categoryName, storeName, storeSlug);
 
       // setMappings(prev => {
       //   // Remove old mapping for this slug if it existed (remap case)
@@ -229,8 +272,12 @@ export default function CategoryMappingTab({ user, categorySettings = [] }) {
       setFlashId(categoryName);
       setTimeout(() => setFlashId(null), 1200);
       setSelected(null);
+      showToast({ type: 'success', title: 'Mapped',
+        message: `${storeName} / ${storeSlug} → ${categoryName}`, duration: TOAST_MS });
     } catch (err) {
       console.error('Save mapping failed:', err);
+      showToast({ type: 'error', title: 'Could not map',
+        message: err?.response?.data?.error || err.message || 'Something went wrong.', duration: TOAST_MS });
     } finally {
       setSaving(null);
     }
@@ -238,12 +285,18 @@ export default function CategoryMappingTab({ user, categorySettings = [] }) {
 
   // ── Handle: delete a mapping ──────────────────────────────
   async function handleDelete(id) {
+    const target = mappings.find(m => m.ID === id);
     setDeleting(id);
     try {
       await deleteCategoryMapping(id);
       setMappings(prev => prev.filter(m => m.ID !== id));
+      showToast({ type: 'warning', title: 'Unmapped',
+        message: target ? `${target.StoreName} / ${target.StoreSlug} removed from ${target.InternalCategory}` : 'Mapping removed.',
+        duration: TOAST_MS });
     } catch (err) {
       console.error('Delete mapping failed:', err);
+      showToast({ type: 'error', title: 'Could not unmap',
+        message: err?.response?.data?.error || err.message || 'Something went wrong.', duration: TOAST_MS });
     } finally {
       setDeleting(null);
     }
@@ -275,19 +328,17 @@ export default function CategoryMappingTab({ user, categorySettings = [] }) {
   return (
     <div>
 
-      {/* ── Instruction banner ── */}
-      <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-slate-800/60
-        border border-slate-700/60 mb-5 text-xs text-slate-400">
-        <svg className="w-4 h-4 text-violet-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <span>
-          Click a <span className="text-slate-200 font-medium">store category</span> on the left to select it,
-          then click an <span className="text-slate-200 font-medium">internal category</span> on the right to link them.
-          The scraper will use these mappings to know which store pages to scrape for each of your products.
-          Press <kbd className="px-1 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px]">Esc</kbd> to cancel a selection.
-        </span>
+      {/* ── How it works (re-opens the info toast) ── */}
+      <div className="flex justify-end mb-3">
+        <button type="button" onClick={showInfo}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-lg border border-slate-700
+            bg-slate-800/60 text-slate-300 hover:text-white hover:border-slate-600 transition-colors">
+          <svg className="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round"
+              d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+          </svg>
+          How it works
+        </button>
       </div>
 
       {/* ── Stats row ── */}
