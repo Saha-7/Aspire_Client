@@ -323,6 +323,15 @@ export async function fetchInternalRecommendations() {
   return response.data.data;
 }
 
+// Recalculate ONE Basic Recommendations row (used right after its PP is edited)
+export async function fetchInternalRecommendationRow(skuId) {
+  const response = await axios.get(
+    `${BASE_URL}/internal-recommendations/${encodeURIComponent(skuId)}`,
+    { withCredentials: true }
+  );
+  return response.data.data;
+}
+
 
 export async function fetchScrapeRuns(limit = 25) {
   const response = await axios.get(`${BASE_URL}/scrape-stats/runs`,

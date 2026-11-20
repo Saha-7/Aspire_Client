@@ -174,13 +174,17 @@ function AppInner() {
   const optimizedCount = data.filter((r) => r.ExtraProfitPct > 0).length;
   const floorCount = totalProducts - optimizedCount;
 
-  // Node's mssql driver returns SQL `bit` as a real boolean, but treat 1 / "1"
-  // as "on" too so this stays correct regardless of how a row got here.
-  const isOn = (v) => v === 1 || v === true || v === "1";
   const totalInternalProducts = internalData.length;
-  const internalOutOfStockCount = internalData.filter((r) => !isOn(r.isInStock)).length;
-  const internalInactiveCount = internalData.filter((r) => !isOn(r.isActive)).length;
   const internalNoPPCount = internalData.filter((r) => r.PP == null).length;
+  const internalPPSetCount = totalInternalProducts - internalNoPPCount;
+
+  // A PP was just set / edited in one row — swap in that row's freshly
+  // recalculated data (PP + recommended SP). Every other row stays untouched.
+  function handleInternalRowUpdated(updatedRow) {
+    setInternalData((prev) =>
+      prev.map((r) => (r.SKU_ID === updatedRow.SKU_ID ? updatedRow : r))
+    );
+  }
 
   const currentLoading = showInternalView ? internalLoading : loading;
   const currentError = showInternalView ? internalError : error;
@@ -317,27 +321,23 @@ function AppInner() {
           {!currentLoading &&
             !currentError &&
             (showInternalView ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
                 <StatCard
                   label="Total Products"
                   value={totalInternalProducts}
-                  sub="All internal products"
+                  sub="Active & in stock"
                   color="violet"
                 />
                 <StatCard
-                  label="Out of Stock"
-                  value={internalOutOfStockCount}
-                  color="amber"
-                />
-                <StatCard
-                  label="Inactive"
-                  value={internalInactiveCount}
-                  color="amber"
+                  label="PP Set"
+                  value={internalPPSetCount}
+                  sub="Recommended SP available"
+                  color="emerald"
                 />
                 <StatCard
                   label="No PP Set"
                   value={internalNoPPCount}
-                  sub="Bill price not received"
+                  sub="Set PP to get a recommendation"
                   color="sky"
                 />
               </div>
@@ -383,7 +383,7 @@ function AppInner() {
           {!currentLoading && !currentError && currentSourceLength === 0 && (
             <div className="text-center py-24 text-slate-500">
               {showInternalView
-                ? "No internal products found."
+                ? "No active, in-stock products found."
                 : "No recommendations found. Run the recommendation engine first."}
             </div>
           )}
@@ -406,7 +406,7 @@ function AppInner() {
 
                   {showInternalView && (
                     <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-slate-500">PP:</span>
+                      
                       <select
                         value={ppFilter}
                         onChange={(e) => setPpFilter(e.target.value)}
@@ -414,9 +414,9 @@ function AppInner() {
                           rounded-lg outline-none cursor-pointer focus:border-violet-500 focus:ring-1
                           focus:ring-violet-500/40 transition-colors"
                       >
-                        <option value="all">All PP</option>
-                        <option value="available">PP available</option>
-                        <option value="unavailable">PP not available</option>
+                        <option value="all">All</option>
+                        <option value="available">PP Available</option>
+                        <option value="unavailable">PP Not Available</option>
                       </select>
                     </div>
                   )}
@@ -486,7 +486,7 @@ function AppInner() {
                   </button>
                 </div>
               ) : showInternalView ? (
-                <InternalRecommendationsTable data={filteredData} />
+                <InternalRecommendationsTable data={filteredData} onRowUpdated={handleInternalRowUpdated} />
               ) : (
                 <PriceTable data={filteredData} />
               )}
