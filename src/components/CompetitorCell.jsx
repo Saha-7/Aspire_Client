@@ -16,12 +16,24 @@ const fmt = (val) =>
     ? '₹' + Number(val).toLocaleString('en-IN', { minimumFractionDigits: 2 })
     : '—';
 
+// "scraped 3h ago" — scraping is on demand, so show how old a price is
+function timeAgo(iso) {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  const mins = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if (mins < 60)   return `${mins}m ago`;
+  if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
+  return `${Math.round(mins / 1440)}d ago`;
+}
+
 const RANK_COLORS = ['text-sky-400', 'text-violet-300', 'text-slate-300', 'text-slate-400'];
 const RANK_LABELS = ['1st', '2nd', '3rd', '4th'];
 
 // ── Single competitor row ─────────────────────────────────────
 function CompetitorRow({ competitor, rank, border = true }) {
-  const { CompetitorPrice, StoreName, StockStatus, ProductURL } = competitor;
+  const { CompetitorPrice, StoreName, StockStatus, ProductURL, ScrapedAt } = competitor;
+  const age = timeAgo(ScrapedAt);
 
   return (
     <div className={`flex items-center gap-2 py-1.5 ${border ? 'border-t border-slate-700/60' : ''}`}>
@@ -32,8 +44,9 @@ function CompetitorRow({ competitor, rank, border = true }) {
       </span>
 
       {/* Store */}
-      <span className="text-xs text-slate-300 font-medium w-[72px] truncate flex-shrink-0 capitalize">
-        {StoreName ?? '—'}
+      <span className="w-[72px] flex-shrink-0 flex flex-col leading-tight">
+        <span className="text-xs text-slate-300 font-medium truncate capitalize">{StoreName ?? '—'}</span>
+        {age && <span className="text-[9px] text-slate-500">{age}</span>}
       </span>
 
       {/* Price */}
@@ -130,6 +143,7 @@ export default function CompetitorCell({
   competitorStockStatus,
   cache,
   setCache,
+  all = false,   // Basic table: list every matched store incl. out-of-stock
 }) {
   const [expanded, setExpanded]   = useState(false);
   const [tooltipOpen, setTooltip] = useState(false);
@@ -142,10 +156,10 @@ export default function CompetitorCell({
 
     setCache(prev => ({ ...prev, [skuId]: { status: 'loading' } }));
 
-    fetchCompetitorDetails(skuId)
+    fetchCompetitorDetails(skuId, { all })
       .then(data  => setCache(prev => ({ ...prev, [skuId]: { status: 'ok',    data  } })))
       .catch(()   => setCache(prev => ({ ...prev, [skuId]: { status: 'error'        } })));
-  }, [skuId, cache, setCache]);
+  }, [skuId, cache, setCache, all]);
 
   // ── Hover handlers ────────────────────────────────────────
   function handleMouseEnter() {
@@ -175,10 +189,17 @@ export default function CompetitorCell({
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
-        <span className="text-sky-400 font-semibold text-xs">
-          {fmt(competitorPrice)}
-        </span>
-        <span className="text-slate-500 text-[10px] capitalize">{storeName}</span>
+        {competitorPrice != null ? (
+          <>
+            <span className="text-sky-400 font-semibold text-xs">
+              {fmt(competitorPrice)}
+            </span>
+            <span className="text-slate-500 text-[10px] capitalize">{storeName}</span>
+          </>
+        ) : (
+          // Matched, but no in-stock competitor right now
+          <span className="text-slate-500 text-[10px]">All out of stock</span>
+        )}
       </div>
 
       {/* ── Expand / Less toggle button ── */}

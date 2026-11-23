@@ -44,7 +44,8 @@ function AppInner() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedBrand, setSelectedBrand] = useState("");
-  const [ppFilter, setPpFilter] = useState("all"); // 'all' | 'available' | 'unavailable' — Basic Recommendations only
+  const [ppFilter, setPpFilter] = useState("all");
+  const [compFilter, setCompFilter] = useState("all"); // Basic: all | matched | unmatched // 'all' | 'available' | 'unavailable' — Basic Recommendations only
   // ── view is derived from the URL, not separate state ──
   const navigate = useNavigate();
   const location = useLocation();
@@ -163,12 +164,17 @@ function AppInner() {
         ppFilter === "available" ? r.PP != null : r.PP == null
       );
     }
+    if (showInternalView && compFilter !== "all") {
+      result = result.filter((r) =>
+        compFilter === "matched" ? r.HasCompetitor : !r.HasCompetitor
+      );
+    }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter((r) => (r.SKU_ID || "").toLowerCase().includes(q));
     }
     return result;
-  }, [data, internalData, showInternalView, searchQuery, selectedCategory, selectedBrand, ppFilter]);
+  }, [data, internalData, showInternalView, searchQuery, selectedCategory, selectedBrand, ppFilter, compFilter]);
 
   const totalProducts = data.length;
   const optimizedCount = data.filter((r) => r.ExtraProfitPct > 0).length;
@@ -418,6 +424,17 @@ function AppInner() {
                         <option value="available">PP Available</option>
                         <option value="unavailable">PP Not Available</option>
                       </select>
+                      <select
+                        value={compFilter}
+                        onChange={(e) => setCompFilter(e.target.value)}
+                        className="pl-2 pr-6 py-1.5 text-xs text-slate-200 bg-slate-800 border border-slate-700
+                          rounded-lg outline-none cursor-pointer focus:border-violet-500 focus:ring-1
+                          focus:ring-violet-500/40 transition-colors"
+                      >
+                        <option value="all">All competitors</option>
+                        <option value="matched">Has competitor</option>
+                        <option value="unmatched">No competitor</option>
+                      </select>
                     </div>
                   )}
 
@@ -449,13 +466,14 @@ function AppInner() {
                   </button>
                 </div>
                 <div className="flex items-center gap-2">
-                  {(searchQuery || selectedCategory || selectedBrand || (showInternalView && ppFilter !== "all")) && (
+                  {(searchQuery || selectedCategory || selectedBrand || (showInternalView && (ppFilter !== "all" || compFilter !== "all"))) && (
                     <button
                       onClick={() => {
                         setSearchQuery("");
                         setSelectedCategory("");
                         setSelectedBrand("");
                         setPpFilter("all");
+                        setCompFilter("all");
                       }}
                       className="text-xs text-slate-500 hover:text-slate-300 underline underline-offset-2 transition-colors"
                     >
@@ -479,6 +497,7 @@ function AppInner() {
                       setSelectedCategory("");
                       setSelectedBrand("");
                       setPpFilter("all");
+                        setCompFilter("all");
                     }}
                     className="mt-2 text-xs text-violet-400 hover:text-violet-300 transition-colors"
                   >

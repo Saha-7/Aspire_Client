@@ -5,6 +5,7 @@
 // parent table stays clean.
 //
 // Props:
+//   refreshFn     — optional async () => result; replaces the single-URL refresh
 //   skuId         — our internal SKU_ID
 //   competitorUrl — the competitor product URL to re-scrape
 //   onRefreshed   — callback(skuId, result) called on success
@@ -21,14 +22,14 @@ const STATUS = {
   ERROR   : 'error',
 };
 
-export default function RefreshButton({ skuId, competitorUrl, onRefreshed }) {
+export default function RefreshButton({ skuId, competitorUrl, onRefreshed, refreshFn }) {
   const [status, setStatus]   = useState(STATUS.IDLE);
   const [tooltip, setTooltip] = useState('');
 
   async function handleClick() {
     if (status === STATUS.LOADING) return;
 
-    if (!competitorUrl) {
+    if (!refreshFn && !competitorUrl) {
       setStatus(STATUS.ERROR);
       setTooltip('No competitor URL available for this product');
       setTimeout(() => setStatus(STATUS.IDLE), 3000);
@@ -39,10 +40,11 @@ export default function RefreshButton({ skuId, competitorUrl, onRefreshed }) {
     setTooltip('');
 
     try {
-      const result = await refreshProduct(competitorUrl, skuId);
+      // refreshFn (Basic table) refreshes ALL stored competitor URLs of the SKU
+      const result = refreshFn ? await refreshFn() : await refreshProduct(competitorUrl, skuId);
 
       setStatus(STATUS.SUCCESS);
-      setTooltip(`Updated ₹${result.newCompetitorPrice?.toLocaleString('en-IN')}`);
+      setTooltip(result.message ?? `Updated ₹${result.newCompetitorPrice?.toLocaleString('en-IN')}`);
 
       // Notify parent to update this row
       if (onRefreshed) onRefreshed(skuId, result);
