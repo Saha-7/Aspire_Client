@@ -44,11 +44,22 @@ export async function logout() {
     { withCredentials: true });
 }
 
-export async function fetchCompetitorDetails(skuId) {
+// all=true (Basic table): every matched store incl. out-of-stock, no 4-row cap
+export async function fetchCompetitorDetails(skuId, { all = false } = {}) {
   const response = await axios.get(`${BASE_URL}/competitor-details/${encodeURIComponent(skuId)}`,
-    { withCredentials: true }
+    { withCredentials: true, params: all ? { all: 1 } : undefined }
   );
   return response.data.data;
+}
+
+// Basic table row Refresh: re-scrapes every stored competitor URL for the SKU
+// and returns { row, results, message } with the freshly recalculated row.
+export async function refreshSkuCompetitors(skuId) {
+  const response = await axios.post(`${BASE_URL}/refresh-sku-competitors`,
+    { skuId },
+    { withCredentials: true }
+  );
+  return response.data;
 }
 
 export async function fetchPPProducts() {
