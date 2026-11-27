@@ -326,9 +326,6 @@ export default function Header({
             <h1 className="text-sm sm:text-lg font-bold text-white tracking-tight truncate">
               TPS Price Intelligence
             </h1>
-            <p className="hidden sm:block text-xs text-slate-500">
-              Price Recommendation Engine — Prototype
-            </p>
           </div>
         </div>
 

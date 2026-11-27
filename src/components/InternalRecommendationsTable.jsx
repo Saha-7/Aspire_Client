@@ -2,7 +2,9 @@
 // ─────────────────────────────────────────────────────────────
 // Basic Recommendations table.
 //
-// Recommended SP = PP × (1 + GST + COB + margin) (the "floor").
+// Recommended SP = the "floor": PP × (1 + GST + COB + margin) plus packing and
+// shipping, grossed up for the Shopify fee and payment gateway % (see
+// server/src/services/pricing.js — the tooltip lists every component).
 // If the SKU is MATCHED with competitors (SKU match only), the lowest
 // in-stock competitor price is used too: 1% below it when that is above
 // the floor, otherwise the floor. Unmatched SKUs show the plain floor and
@@ -23,6 +25,7 @@ import PPCell from "./PPCell";
 import CompetitorCell from "./CompetitorCell";
 import RefreshButton from "./RefreshButton";
 import { refreshSkuCompetitors } from "../services/api";
+import { pricingBreakdownLines, rowToBreakdown } from "../utils/pricingTooltip";
 
 const fmt = (val) =>
   val != null
@@ -94,9 +97,17 @@ export default function InternalRecommendationsTable({ data, onRowUpdated }) {
                       text-xs text-slate-200 whitespace-nowrap shadow-xl
                       opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150
                     ">
-                      {row.PricingStrategy === 'optimized'
-                        ? `1% below lowest competitor (${row.StoreName ?? 'store'})`
-                        : `Includes GST (${row.GSTPct}%) & COB (${row.COBPct}%) & Margin (${row.MarginPct}%)`}
+                      {row.PricingStrategy === 'optimized' && (
+                        <div className="font-semibold text-slate-100 mb-1">
+                          1% below lowest competitor ({row.StoreName ?? 'store'})
+                        </div>
+                      )}
+                      <div className="font-semibold text-slate-100 mb-0.5">
+                        {row.PricingStrategy === 'optimized' ? 'Minimum price includes' : 'Includes'}
+                      </div>
+                      {pricingBreakdownLines(rowToBreakdown(row)).map((line) => (
+                        <div key={line}>{line}</div>
+                      ))}
                       <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-600" />
                     </div>
                   </div>

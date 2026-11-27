@@ -18,6 +18,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import CategoryMappingTab from './CategoryMappingTab';
 import SalespersonMappingTab from './SalespersonMappingTab';
 import BusinessVariablesTab from './BusinessVariablesTab';
+import GlobalCostsControl from './GlobalCostsControl';
 import { useToast } from '../context/ToastContext';
 import {
   fetchCategorySettings,
@@ -999,6 +1000,8 @@ export default function SettingsView({ onClose, user }) {
         {!loading && !error && activeTab === TABS.BUSINESS && (
           <>
             {canManage && <VarianceThresholdControl />}
+
+            {canManage && <GlobalCostsControl />}
 
             <BusinessVariablesTab
               categorySettings={data}

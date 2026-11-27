@@ -9,6 +9,7 @@ import StatusBadge    from './StatusBadge';
 import RefreshButton  from './RefreshButton';
 import CompetitorCell from './CompetitorCell';
 import TakeActionCell from './TakeActionCell';
+import { pricingBreakdownLines, rowToBreakdown } from '../utils/pricingTooltip';
 
 const fmt = (val) =>
   val != null
@@ -28,8 +29,9 @@ export default function PriceTable({ data: initialData }) {
         ...row,
         CompetitorPrice : result.newCompetitorPrice ?? row.CompetitorPrice,
         RecommendedSP   : result.newRecommendedSP   ?? row.RecommendedSP,
-        ExtraProfitPct  : row.PP
-          ? parseFloat((((result.newRecommendedSP - (row.PP * 1.30)) / (row.PP * 1.30)) * 100).toFixed(2))
+        // Extra profit = how far the new price sits above the floor (BaseFloor comes from the server)
+        ExtraProfitPct  : (row.BaseFloor > 0 && result.newRecommendedSP != null)
+          ? parseFloat((((result.newRecommendedSP - row.BaseFloor) / row.BaseFloor) * 100).toFixed(2))
           : row.ExtraProfitPct,
       };
     }));
@@ -77,9 +79,8 @@ export default function PriceTable({ data: initialData }) {
       accessorKey: 'RecommendedSP',
       header: 'Recommended SP (₹)',
       cell: (info) => {
-        const row    = info.row.original;
-        const cob    = row.COBPct    ?? 7;
-        const margin = row.MarginPct ?? 5;
+        const row   = info.row.original;
+        const lines = pricingBreakdownLines(rowToBreakdown(row));
         return (
           <div className="relative group inline-block">
             <span className="text-emerald-400 font-semibold text-xs cursor-default">
@@ -91,7 +92,8 @@ export default function PriceTable({ data: initialData }) {
               text-xs text-slate-200 whitespace-nowrap shadow-xl
               opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150
             ">
-              Includes GST (18%) &amp; COB ({cob}%) &amp; Margin ({margin}%)
+              <div className="font-semibold text-slate-100 mb-0.5">Includes</div>
+              {lines.map((line) => <div key={line}>{line}</div>)}
               <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-600" />
             </div>
           </div>
