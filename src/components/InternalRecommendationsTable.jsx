@@ -57,7 +57,7 @@ export default function InternalRecommendationsTable({ data, onRowUpdated }) {
       <table className="w-full text-sm border-collapse table-fixed">
         <thead>
           <tr className="bg-slate-800/80 border-b border-slate-700">
-            {['Product SKU', 'Title', 'Category', 'PP (₹)', 'Current SP (₹)', 'Recommended SP (₹)', 'Competitor Price (₹)', 'Take Action', 'Refresh'].map(h => (
+            {['Product SKU', 'Title', 'Category', 'PP (₹)', 'Current SP (₹)', 'Recommended SP (₹)', 'Competitor Price (₹)', 'Take Action', 'Re-Scrape'].map(h => (
               <th key={h} className="px-2 py-3 text-center text-xs font-semibold text-slate-400 uppercase tracking-wider">
                 {h}
               </th>
